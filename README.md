@@ -2,7 +2,7 @@
 
 This repository is for student work at the Budapest University of Technology and Economics' Scientific Student Conference.
 
-![image](https://github.com/Kurtiadam/speedcam_cvs/assets/98428367/51f2c69d-5758-4fde-9175-7b40dd9e4655)
+![image](https://github.com/Kurtiadam/traffic-speed-camera/assets/98428367/7ac4438d-f6ec-4407-bed6-3a43f3b6cac2)
 
 ## How to use 
 Required libraries and other resources:
