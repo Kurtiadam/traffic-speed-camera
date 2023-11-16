@@ -1,0 +1,24 @@
+data:
+    batch_size: 64                                      # batch size
+    max_lp_length: 10                                   # number of max characters on the license plates
+    classes: ' ABCDEFGHIJKLMNOPQRSTUXYVWZ0123456789-'   # characters to recognize
+    train_set_ratio: 0.8                                # train set ratio
+    val_set_ratio: 0.1                                  # val set ratio
+    img_target_height: 32                               # image resize target height
+    img_target_width: 80                                # image resize target width
+    aug_jitter_brightness: 0.3                          # colorjitter brightness value
+    aug_jitter_contrast: 0.3                           # colorjitter contrast value
+    aug_jitter_saturation: 0.05                        # colorjitter saturation value
+    aug_jitter_hue: 0                                   # colorjitter hue value
+    aug_perspective_transform_prob: 0                 # randomperspective transform application probability 
+    seed: 42                                            # seed
+    dataset_size_modifier: 1                            # multiplies the length of the dataset with this number ]0-1]
+    mode: 'crops'                                     # 'crops' or 'renders' - training on cropped images or plate render images
+    lp_type: 'multirow'                                 # indicates multi row dataset
+
+training:
+    epochs: 150                                         # epochs
+    learning_rate: 0.001                                # learning rate
+    weight_decay: 0.0005                               # weight decay
+    scheduler_step_size: 150                            # step size for StepLR
+    scheduler_multiplier: 0.99                          # multiplier for StepLR
