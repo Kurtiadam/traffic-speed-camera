@@ -1,4 +1,4 @@
-# Speed camera algorithm with computer vision
+# Development of a speed measurement system using spatial transformer network and monocular depth estimation algorithm
 
 This repository is for student work at the Budapest University of Technology and Economics' Scientific Student Conference.
 
