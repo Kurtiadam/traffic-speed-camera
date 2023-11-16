@@ -9,4 +9,10 @@ Required libraries and other resources:
 - download AdaBins pretrained models from here: https://drive.google.com/drive/folders/1nYyaQXOBjNdUJDsmJpcRpu6oE55aQoLA?usp=sharing, place it in a folder called "pretrained"
 - create virtual environment with conda using the following command: conda env create -f environment.yaml
 
-Run main.py. 
+Run the following commands:
+For inspecting the speed measurement benchmark: python main.py --input_path ./samples/speed_measurement_sample_cut.MOV
+For inspecting the license plate recognition: python main.py --input_path ./samples/ocr_sample.MOV
+
+Other commands can be viewed by: python main.py --help
+
+You can exit the running of the algorithm by pressing 'q' or waiting for the input to finish. Upon completion, the speed measurement results will be saved in an excel file named 'speed_estimation_results.xlsx'.
