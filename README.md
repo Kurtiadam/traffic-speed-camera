@@ -2,17 +2,17 @@
 
 This repository is for student work at the Budapest University of Technology and Economics' Scientific Student Conference.
 
-![image](https://github.com/Kurtiadam/traffic-speed-camera/assets/98428367/7ac4438d-f6ec-4407-bed6-3a43f3b6cac2)
+![image](https://github.com/Kurtiadam/traffic-speed-camera/assets/98428367/b55f3062-624f-4441-bcc4-c568be6a9135)
 
 ## How to use 
 Required libraries and other resources:
 - download AdaBins pretrained models from here: https://drive.google.com/drive/folders/1nYyaQXOBjNdUJDsmJpcRpu6oE55aQoLA?usp=sharing, place it in a folder called "pretrained"
 - create virtual environment with conda using the following command: conda env create -f environment.yaml
 
-Run the following commands:
-For inspecting the speed measurement benchmark: python main.py --input_path ./samples/speed_measurement_sample_cut.MOV
-For inspecting the license plate recognition: python main.py --input_path ./samples/ocr_sample.MOV
+Run the following commands:\
+For inspecting the speed measurement benchmark: ```python main.py --input_path ./samples/speed_measurement_sample_cut.MOV```\
+For inspecting the license plate recognition: ```python main.py --input_path ./samples/ocr_sample.MOV```\
 
-Other commands can be viewed by: python main.py --help
+Other commands can be viewed by: ```python main.py --help```
 
 You can exit the running of the algorithm by pressing 'q' or waiting for the input to finish. Upon completion, the speed measurement results will be saved in an excel file named 'speed_estimation_results.xlsx'.
