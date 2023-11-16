@@ -11,7 +11,7 @@ Required libraries and other resources:
 
 Run the following commands:\
 For inspecting the speed measurement benchmark: ```python main.py --input_path ./samples/speed_measurement_sample_cut.MOV```\
-For inspecting the license plate recognition: ```python main.py --input_path ./samples/ocr_sample.MOV```\
+For inspecting the license plate recognition: ```python main.py --input_path ./samples/ocr_sample.MOV```
 
 Other commands can be viewed by: ```python main.py --help```
 
