@@ -28,8 +28,10 @@ class TrafficSpeedCamera:
         """
         Args:
             input_path (str): Path to the input file or directory.
+            xml_input_path (str): Path to the XML ground truth file used to benchmark the speed estimation algorithm.
             input_mode (str): Input mode, either "burst_photos" or "video".
-            fps (int, optional): Frames per second of the source. Defaults to 6.
+            fps (int, optional): Frames per second of the source. Defaults to 30.
+            depth_estimator_algorithm (str, optional): The monocular depth estimation algorithm to use. "zoe" or "adabins". Defaults to "zoe".
         """
         self.region_checker = RegionChecker()
         self.depth_calculator = DepthCalculator()
@@ -56,7 +58,7 @@ class TrafficSpeedCamera:
         self.iter = 0
 
     def process_frame(self, frame: np.ndarray, show_tracking: bool) -> None:
-        """Process a single frame
+        """Process a single frame.
 
         Args:
             frame (np.ndarray): The frame to process.
@@ -85,7 +87,7 @@ class TrafficSpeedCamera:
         return vehicle_dictionary
 
     def run(self, show_tracking: bool, ret: bool = True) -> None:
-        """Run the speed camera algorithm
+        """Run the speed camera algorithm.
 
         Args:
             show_tracking (bool): Flag indicating whether to display tracking information.
@@ -121,7 +123,7 @@ class TrafficSpeedCamera:
             raise ValueError("input_mode can only be 'video' or 'burst_photos' but got {}".format(self.input_mode))
 
     def measure_fps(self, frame) -> None:
-        """Measure and display the frames per second
+        """Measure and display the frames per second.
 
         Args:
             frame (np.ndarray): The frame to display the FPS on.
@@ -138,6 +140,8 @@ class TrafficSpeedCamera:
 
 
 class RegionChecker:
+    """Class for checking region of interests on the frame."""
+
     def __init__(self) -> None:
         self.speed_measurement_area = [(0, 460), (1920, 370), (1920, 650), (0, 800), ]
         self.lane_1_area = [(222, 9), (599, 8), (519, 1071), (0, 1072)]
@@ -146,7 +150,16 @@ class RegionChecker:
         self.invalid_detection_area = [(0, 180), (1450, 170), (1920, 775), (1920, 0), (0, 0)]
 
 
-    def is_point_in_polygon(self, point, polygon):
+    def is_point_in_polygon(self, point:Tuple, polygon:list):
+        """Checks if a point is in a given polygon.
+
+        Args:
+            point (Tuple): Point to check.
+            polygon (list): Polygon to check.
+
+        Returns:
+            inside (bool): Whether the point is in the polygon or not.
+        """
         poly_path = mplPath.Path(polygon)
         inside = False
         if poly_path.contains_point(point):
@@ -156,12 +169,28 @@ class RegionChecker:
 
 
 class GTHandler:
-    def __init__(self, xml_input_path):
+    """Ground truth extractor for speed estimation benchmarking."""
+    
+    def __init__(self, xml_input_path:str):
+        """
+
+        Args:
+            xml_input_path (str): XML file path.
+        """
         with open(xml_input_path, 'r') as file:
             xml_content = file.read()
         self.root = ET.fromstring(xml_content)
 
-    def get_vehicle_gt_params(self, lane, iframe):
+    def get_vehicle_gt_params(self, lane:int, iframe:int):
+        """Get a vehicles parameters like ground truth speed and ground truth lane according to the given input values.
+
+        Args:
+            lane (int): Input lane description, where the vehicle was found.
+            iframe (int): Input frame index description, at which the vehicle was detected.
+
+        Returns:
+            tuple(np.float16, int, int): Extracted vehicle ground truth paramteres: ground truth speed, ground truth lane, ground truth frame index
+        """
         min_diff = float('inf')
         speed_gt = -1
         lane_gt = -1
@@ -191,7 +220,14 @@ class GTHandler:
 
 
 class VehicleDetector:
+    """Vehicle detection class."""
+
     def __init__(self, region_checker: RegionChecker):
+        """
+
+        Args:
+            region_checker (RegionChecker): region checker object
+        """
         self.model_vd = YOLO('./models/yolov8m.pt')
         # ["bicycle", "car", "motorcycle", "bus", "truck"]
         self.searched_class_indices = [1, 2, 3, 5, 7]
@@ -240,6 +276,12 @@ class ObjectTracker:
     """Class for object tracking"""
 
     def __init__(self, region_checker: RegionChecker, gt_speed_handler: GTHandler):
+        """
+
+        Args:
+            region_checker (RegionChecker): region checker object
+            gt_speed_handler (GTHandler): ground truth speed handler object
+        """
         self.tracker = Sort(max_age=2, min_hits=5, iou_threshold=0.3)
         self.vehicle_dictionary = {}
         self.region_checker = region_checker
@@ -365,41 +407,50 @@ class OCR:
         self.single_net = create_network(source='./OCR/singlerow_model.pth')
         self.multi_net = create_network_multi(source='./OCR/multirow_model.pth')
 
-    def read_license_plate(self, cropped_lp, lp_type: str):
-            """Reading license plate characters."""
-            cropped_lp_ = torch.tensor(cropped_lp, dtype=torch.float32)
-            cropped_lp_tensor = cropped_lp_.permute(2, 0, 1)
-            self.single_net.eval()
-            self.multi_net.eval()
-            mean = torch.mean(cropped_lp_tensor, dim=[1, 2])
-            std = torch.std(cropped_lp_tensor, dim=[1, 2])
-            transform_single = transforms.Compose([transforms.Resize([self.config["data"]["img_target_height"],self.config["data"]["img_target_width"]], antialias=True),
-                                            transforms.Normalize(mean, std)])
-            transform_multi = transforms.Compose([transforms.Resize([self.config_multi["data"]["img_target_height"],self.config_multi["data"]["img_target_width"]], antialias=True),
-                                            transforms.Normalize(mean, std)])       
+    def read_license_plate(self, cropped_lp: np.ndarray, lp_type: str):
+        """Reading license plate characters.
 
-            if lp_type == "single":
-                with torch.inference_mode():
-                    # print("Using single row model")
-                    img_tensor = transform_single(cropped_lp_tensor).unsqueeze(0)
-                    inputs = img_tensor.cuda()
-                    outputs = self.single_net(inputs)
-            elif lp_type == "multi":
-                with torch.inference_mode():
-                    # print("Using multi row model")
-                    self.multi_uses += 1
-                    img_tensor = transform_multi(cropped_lp_tensor).unsqueeze(0)
-                    inputs = img_tensor.cuda()
-                    outputs = self.multi_net(inputs)
+        Args:
+            cropped_lp (np.ndarray): Cropped license plate image.
+            lp_type (str): License plate type. Can be "single" or "multi" rowed.
 
-            _, predicted = torch.max(outputs, dim=0)
-            predicted_wo_encoding = [(self.config["data"]["classes"][idx]) for idx in predicted]
-            predicted_wo_encoding_str = ''.join(predicted_wo_encoding)
+        Returns:
+            predicted_wo_encoding_str (str): Read license plate code.
+        """
+        cropped_lp_ = torch.tensor(cropped_lp, dtype=torch.float32)
+        cropped_lp_tensor = cropped_lp_.permute(2, 0, 1)
+        self.single_net.eval()
+        self.multi_net.eval()
+        mean = torch.mean(cropped_lp_tensor, dim=[1, 2])
+        std = torch.std(cropped_lp_tensor, dim=[1, 2])
+        transform_single = transforms.Compose([transforms.Resize([self.config["data"]["img_target_height"],self.config["data"]["img_target_width"]], antialias=True),
+                                        transforms.Normalize(mean, std)])
+        transform_multi = transforms.Compose([transforms.Resize([self.config_multi["data"]["img_target_height"],self.config_multi["data"]["img_target_width"]], antialias=True),
+                                        transforms.Normalize(mean, std)])       
 
-            return predicted_wo_encoding_str
+        if lp_type == "single":
+            with torch.inference_mode():
+                # print("Using single row model")
+                img_tensor = transform_single(cropped_lp_tensor).unsqueeze(0)
+                inputs = img_tensor.cuda()
+                outputs = self.single_net(inputs)
+        elif lp_type == "multi":
+            with torch.inference_mode():
+                # print("Using multi row model")
+                self.multi_uses += 1
+                img_tensor = transform_multi(cropped_lp_tensor).unsqueeze(0)
+                inputs = img_tensor.cuda()
+                outputs = self.multi_net(inputs)
+
+        _, predicted = torch.max(outputs, dim=0)
+        predicted_wo_encoding = [(self.config["data"]["classes"][idx]) for idx in predicted]
+        predicted_wo_encoding_str = ''.join(predicted_wo_encoding)
+
+        return predicted_wo_encoding_str
 
 
 class DepthCalculator:
+    """Depth calculator in the image."""
     def __init__(self):
         self.real_sensor_resolution_w = 3280
         self.img_width_pixel = 1920
@@ -427,12 +478,31 @@ class DepthCalculator:
         self.iter = 1
 
     @staticmethod
-    def get_license_plate_depth(cropped_lp_depth_map):
+    def get_license_plate_depth(cropped_lp_depth_map:np.ndarray):
+        """Depth outlier filtering.
+
+        Args:
+            cropped_lp_depth_map (np.ndarray): Depth map cropped for the license plate area.
+
+        Returns:
+            lp_depth(np.float16): The depth of the license plate from the camera in meters.
+        """
         lp_depth = np.float16(np.average(cropped_lp_depth_map))
 
         return lp_depth
 
-    def get_3D_coordinates(self, depth_map, u, v, z):
+    def get_3D_coordinates(self, depth_map:np.ndarray, u:int, v:int, z:int):
+        """Get the 3D coordinates of an object on the image given its depth map.
+
+        Args:
+            depth_map (np.ndarray): Depth map of the image.
+            u (int): Objects horizontal coordinate on the image plane.
+            v (int): Objects vertical coordinate on the image plane.
+            z (int): Objects depth from the depth map.
+
+        Returns:
+            list(np.float16, np.float16, np.float16): 3D reconstructed coordinates.
+        """
         px = depth_map.shape[1]/2
         py = depth_map.shape[0]/2
         x = (u*z - px*z) / self.focal_length_pixel_x
@@ -440,7 +510,20 @@ class DepthCalculator:
 
         return [np.float16(x), np.float16(y), np.float16(z)]
 
-    def normalize_depth_map(self, depth_map, scaling_ratio = 1, method = 'scaling'):
+    def normalize_depth_map(self, depth_map:np.ndarray, scaling_ratio:float = 1.0, method:str = 'scaling'):
+        """Depth map normalization.
+
+        Args:
+            depth_map (np.ndarray): Depth map to normalize.
+            scaling_ratio (float, optional): Scaling ratio to use. Defaults to 1.0.
+            method (str, optional): Normalization method to use. Can be "normalizing" or "scaling". Defaults to 'scaling'.
+
+        Raises:
+            ValueError: If the method input parameter is not "normalizing" or "scaling".
+
+        Returns:
+            depth_map_modified(np.ndarray): Normalized depth map.
+        """
    
         # Rejection of lower and upper 1%
         lower_threshold = np.percentile(depth_map, 1)
@@ -476,7 +559,15 @@ class DepthCalculator:
 
         return depth_map_modified
     
-    def get_scaling_ratio(self, depth_map):
+    def get_scaling_ratio(self, depth_map:np.ndarray):
+        """Scaling ratio calculator.
+
+        Args:
+            depth_map (np.ndarray): Input depth map.
+
+        Returns:
+            list(np.float16, bool): Scaling ratio, whether to skip a frame because of incorrect scaling or not.
+        """
         skip_frame = False
         px = depth_map.shape[1]/2
         py = depth_map.shape[0]/2
@@ -523,7 +614,13 @@ class DepthCalculator:
     
 
 class DepthEstimatorZoe:
+    """Depth map estimation using ZoeDepth"""
     def __init__(self, depth_calculator: DepthCalculator):
+        """
+
+        Args:
+            depth_calculator (DepthCalculator): depth calculator object
+        """
         # torch.hub.help("intel-isl/MiDaS", "DPT_BEiT_L_384", force_reload=True)  # Triggers fresh download of MiDaS repo
         repo = "isl-org/ZoeDepth"
         model = "ZoeD_NK"
@@ -533,7 +630,15 @@ class DepthEstimatorZoe:
         self.zoe = model_zoe.to(DEVICE)
         self.depth_calculator = depth_calculator
 
-    def create_depth_map(self, input_frame: np.ndarray, scaling_ratio: np.float16 = 1):
+    def create_depth_map(self, input_frame: np.ndarray):
+        """Estimate a depth map using ZoeDepth.
+
+        Args:
+            input_frame (np.ndarray): Input RGB frame to estimate depth map from.
+
+        Returns:
+            depth_map(np.ndarray): Estimated depth map.
+        """
         img = Image.fromarray(input_frame)
         input_img = img.convert("RGB")
         depth_map = self.zoe.infer_pil(input_img, pad_input = False, with_flip_aug = False)
@@ -542,11 +647,25 @@ class DepthEstimatorZoe:
 
 
 class DepthEstimatorAdabins:
+    """Depth map estimation using AdaBins"""
     def __init__(self, depth_calculator: DepthCalculator):
+        """
+
+        Args:
+            depth_calculator (DepthCalculator): depth calculator object
+        """
         self.infer_helper = InferenceHelper(dataset='nyu')
         self.depth_calculator = depth_calculator
 
     def create_depth_map(self, input_frame: np.ndarray):
+        """Estimate a depth map using AdaBins.
+
+        Args:
+            input_frame (np.ndarray): Input RGB frame to estimate depth map from.
+
+        Returns:
+            depth_map(np.array): Estimated depth map.
+        """
         img = Image.fromarray(input_frame)
         input_img = img.resize((640,480)).convert("RGB")
         bin_centers, depth_map = self.infer_helper.predict_pil(input_img)
@@ -558,10 +677,14 @@ class DepthEstimatorAdabins:
      
 
 class LicensePlateDetector:
+    """License plate detection."""
     def __init__(self, oc_recognizer: OCR, depth_estimator, depth_calculator: DepthCalculator, region_checker: RegionChecker):
         """
         Args:
             oc_recognizer(OCR): The object that performs license plate OCR.
+            depth_estimator(DepthEstimatorZoe or DepthEstimatorAdabins): depth estimator object.
+            depth_calculator(DepthCalculator): depth calculator object.
+            region_checker(RegionChecker): region checker object.
         """
         self.model_lp = YOLO(
             './models/lp_detector.pt')
@@ -722,7 +845,6 @@ class SpeedEstimator:
         Args:
             frame(np.ndarray): Current frame of the video.
             vehicle_dictionary (Dict): Dictionary containing information about tracked objects.
-            iter(int): Current frame number.
 
         Returns:
             vehicle_dictionary: Updated dictionary of tracked objects with speed estimates.
@@ -743,8 +865,8 @@ class SpeedEstimator:
             if vehicle_dictionary[idx]['predicted_speed'] != 0 and vehicle_dictionary[idx]['vd_tracked']:
                 cv2.putText(frame, str(int(np.round(vehicle_dictionary[idx]['predicted_speed']))) + " km/h", (vehicle_dictionary[idx]['vd_bbox_coords'][2],
                                                             vehicle_dictionary[idx]['vd_bbox_coords'][3]), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 165, 0), 2)
-                cv2.putText(frame, str(int(np.round(float(vehicle_dictionary[idx]['gt_speed'])))) + " km/h", (vehicle_dictionary[idx]['vd_bbox_coords'][2],
-                                                            vehicle_dictionary[idx]['vd_bbox_coords'][3]+40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+                # cv2.putText(frame, str(int(np.round(float(vehicle_dictionary[idx]['gt_speed'])))) + " km/h", (vehicle_dictionary[idx]['vd_bbox_coords'][2],
+                #                                             vehicle_dictionary[idx]['vd_bbox_coords'][3]+40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
                                         
         return vehicle_dictionary
 
@@ -776,6 +898,11 @@ class IOHandler:
         return self.terminate
 
     def write_results(self, vehicle_dictionary: Dict):
+        """Writing the speed estimation benchmark results into an excel sheet.
+
+        Args:
+            vehicle_dictionary (Dict): Vehicle dictinary containing the detected vehicles all information.
+        """
         if self.terminate:
             df = pd.DataFrame.from_dict(vehicle_dictionary, orient='index')
             df['predicted_speed'] = df['predicted_speed'].apply(lambda x: "{:.2f}".format(x))
@@ -785,15 +912,11 @@ class IOHandler:
 
     
     def end_stream(self):
+        """Ending the video stream."""
         if self.terminate:
             self.cap.release()
             cv2.destroyAllWindows()
             sys.exit()
-
-    def pop_stationary(vehicle_dictionary: Dict):
-        for idx in vehicle_dictionary.keys():
-            if vehicle_dictionary[idx]['was_stationary']:
-                pass
 
             
 def main():
