@@ -7,7 +7,7 @@ This repository is for student work at the Budapest University of Technology and
 ## How to use 
 Required libraries and other resources:
 - download AdaBins pretrained models from here: https://drive.google.com/drive/folders/1nYyaQXOBjNdUJDsmJpcRpu6oE55aQoLA?usp=sharing, place it in a folder called "pretrained"
-- create virtual environment with conda using the following command: conda env create -f environment.yaml
+- create virtual environment with conda using the following command: ```conda env create -f environment.yaml```
 
 Run the following commands:\
 For inspecting the speed measurement benchmark: ```python main.py --input_path ./samples/speed_measurement_sample_cut.MOV```\
