@@ -1,3 +1,5 @@
+from Depth_Anything.depth_anything.util.transform import Resize, NormalizeImage, PrepareForNet
+from Depth_Anything.depth_anything.dpt import DepthAnything
 from ultralytics import YOLO
 import cv2
 import argparse
@@ -9,6 +11,7 @@ import os
 import sys
 import torch
 from torchvision import transforms
+from torchvision.transforms import Compose
 from OCR.config_utils import load_config
 from OCR.ocr_model import create_network
 from OCR.ocr_model_multirow import create_network as create_network_multi
@@ -19,12 +22,15 @@ from typing import Tuple, Dict
 from AdaBins.infer import InferenceHelper
 import xml.etree.ElementTree as ET
 import matplotlib.path as mplPath
+depth_anything_dir = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "Depth_Anything"))
+sys.path.append(depth_anything_dir)
 
 
 class TrafficSpeedCamera:
     """Class for running the speed camera algorithm"""
 
-    def __init__(self, input_path: str, xml_input_path:str, input_mode: str, fps: float = 30, depth_estimator_algorithm: str = "zoe"):
+    def __init__(self, input_path: str, xml_input_path: str, input_mode: str, fps: float = 30, depth_estimator_algorithm: str = "zoe"):
         """
         Args:
             input_path (str): Path to the input file or directory.
@@ -39,17 +45,23 @@ class TrafficSpeedCamera:
         self.vehicle_detector = VehicleDetector(self.region_checker)
         self.oc_recognizer = OCR()
 
-        if depth_estimator_algorithm == "zoe":
-            self.depth_estimator = DepthEstimatorZoe(self.depth_calculator)
+        if depth_estimator_algorithm == "zoedepth":
+            self.depth_estimator = DepthEstimatorZoeDepth(
+                self.depth_calculator)
         elif depth_estimator_algorithm == "adabins":
-            self.depth_estimator = DepthEstimatorAdabins(self.depth_calculator)    
+            self.depth_estimator = DepthEstimatorAdabins(self.depth_calculator)
+        elif depth_estimator_algorithm == "depth_anything":
+            self.depth_estimator = DepthEstimatorDepthAnything(
+                self.depth_calculator, "vits")
         else:
-            raise ValueError("depth_estimator_algorithm can be either 'zoe' or 'adabins' but got {}".format(depth_estimator_algorithm))
+            raise ValueError("depth_estimator_algorithm can be either 'zoedepth', 'adabins' or 'depth_anything' but got {}".format(
+                depth_estimator_algorithm))
 
         self.license_plate_detector = LicensePlateDetector(
             self.oc_recognizer, self.depth_estimator, self.depth_calculator, self.region_checker)
         self.gt_speed_handler = GTHandler(xml_input_path)
-        self.object_tracker = ObjectTracker(self.region_checker, self.gt_speed_handler)
+        self.object_tracker = ObjectTracker(
+            self.region_checker, self.gt_speed_handler)
         self.speed_estimator = SpeedEstimator(fps)
         self.fps_count = 0
         self.input_mode = input_mode
@@ -73,14 +85,15 @@ class TrafficSpeedCamera:
                 frame, show_frame, vehicle_dictionary, self.iter)
             if not skip_speed_measurement:
                 self.speed_estimator.measure_distance(vehicle_dictionary_lp)
-                self.speed_estimator.estimate_speed(show_frame, vehicle_dictionary_lp)
+                self.speed_estimator.estimate_speed(
+                    show_frame, vehicle_dictionary_lp)
 
             # for key, value in vehicle_dictionary_lp.items():
             #     print("\n" + str(key))
             #     for subkey, subvalue in value.items():
             #         print(subkey, subvalue)
             # print("----------------------------------------------------------------------")
-        
+
         self.measure_fps(show_frame)
         cv2.imshow("Frame", show_frame)
 
@@ -120,7 +133,8 @@ class TrafficSpeedCamera:
                 vehicle_dictionary = self.process_frame(frame, show_tracking)
 
         else:
-            raise ValueError("input_mode can only be 'video' or 'burst_photos' but got {}".format(self.input_mode))
+            raise ValueError(
+                "input_mode can only be 'video' or 'burst_photos' but got {}".format(self.input_mode))
 
     def measure_fps(self, frame) -> None:
         """Measure and display the frames per second.
@@ -143,14 +157,15 @@ class RegionChecker:
     """Class for checking region of interests on the frame."""
 
     def __init__(self) -> None:
-        self.speed_measurement_area = [(0, 460), (1920, 370), (1920, 650), (0, 800), ]
+        self.speed_measurement_area = [
+            (0, 460), (1920, 370), (1920, 650), (0, 800), ]
         self.lane_1_area = [(222, 9), (599, 8), (519, 1071), (0, 1072)]
         self.lane_2_area = [(599, 9), (962, 8), (1349, 1067), (519, 1071)]
         self.lane_3_area = [(962, 8), (1307, 12), (1920, 1075), (1349, 1067)]
-        self.invalid_detection_area = [(0, 180), (1450, 170), (1920, 775), (1920, 0), (0, 0)]
+        self.invalid_detection_area = [
+            (0, 180), (1450, 170), (1920, 775), (1920, 0), (0, 0)]
 
-
-    def is_point_in_polygon(self, point:Tuple, polygon:list):
+    def is_point_in_polygon(self, point: Tuple, polygon: list):
         """Checks if a point is in a given polygon.
 
         Args:
@@ -164,14 +179,14 @@ class RegionChecker:
         inside = False
         if poly_path.contains_point(point):
             inside = True
-        
+
         return inside
 
 
 class GTHandler:
     """Ground truth extractor for speed estimation benchmarking."""
-    
-    def __init__(self, xml_input_path:str):
+
+    def __init__(self, xml_input_path: str):
         """
 
         Args:
@@ -181,7 +196,7 @@ class GTHandler:
             xml_content = file.read()
         self.root = ET.fromstring(xml_content)
 
-    def get_vehicle_gt_params(self, lane:int, iframe:int):
+    def get_vehicle_gt_params(self, lane: int, iframe: int):
         """Get a vehicles parameters like ground truth speed and ground truth lane according to the given input values.
 
         Args:
@@ -199,7 +214,7 @@ class GTHandler:
         for idx, vehicle in enumerate(self.root.find('gtruth')):
             if int(vehicle.attrib['lane']) == lane:
                 diff = abs(int(vehicle.attrib['iframe']) - int(iframe))
-                
+
                 if diff < min_diff:
                     min_diff = diff
                     lane_gt = vehicle.attrib['lane']
@@ -245,7 +260,7 @@ class VehicleDetector:
         detections = np.empty((0, 5))
         st_time = time.time()
         vd_results = self.model_vd(
-            frame, stream=True, classes=self.searched_class_indices, conf=0.4, iou=0.3, agnostic_nms=True, verbose = False)
+            frame, stream=True, classes=self.searched_class_indices, conf=0.4, iou=0.3, agnostic_nms=True, verbose=False)
 
         for result in vd_results:
             boxes = result.boxes
@@ -253,17 +268,18 @@ class VehicleDetector:
                 x1_vd, y1_vd, x2_vd, y2_vd = tuple(map(int, box.xyxy[0]))
                 mid_vd = ((x2_vd + x1_vd) / 2, (y2_vd + y1_vd) / 2)
 
-                in_invalid_area = self.region_checker.is_point_in_polygon(mid_vd, self.region_checker.invalid_detection_area)
+                in_invalid_area = self.region_checker.is_point_in_polygon(
+                    mid_vd, self.region_checker.invalid_detection_area)
                 if not in_invalid_area:
                     cv2.rectangle(frame, (x1_vd, y1_vd),
-                                (x2_vd, y2_vd), (0, 165, 255), 2)
+                                  (x2_vd, y2_vd), (0, 165, 255), 2)
                     conf = math.ceil((box.conf[0]*100))/100
                     cls = int(box.cls[0])
                     cv2.putText(frame, f'{str(self.model_vd.model.names[cls])} {conf}', [
                                 x1_vd, y1_vd], cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 165, 255), 2)
                     bbox_arr = np.array([x1_vd, y1_vd, x2_vd, y2_vd, conf])
                     detections = np.vstack((detections, bbox_arr))
-                    
+
         en_time = time.time()
         elapsed_time = en_time - st_time
         elapsed_time_ms = elapsed_time * 1000
@@ -345,9 +361,12 @@ class ObjectTracker:
 
             # Check which lane the vehicle is in
             if len(self.vehicle_dictionary[idx]['lp_center']) != 0:
-                in_first_lane = self.region_checker.is_point_in_polygon(self.vehicle_dictionary[idx]['lp_center'][-1], self.region_checker.lane_1_area)
-                in_second_lane = self.region_checker.is_point_in_polygon(self.vehicle_dictionary[idx]['lp_center'][-1], self.region_checker.lane_2_area)
-                in_third_lane = self.region_checker.is_point_in_polygon(self.vehicle_dictionary[idx]['lp_center'][-1], self.region_checker.lane_3_area)
+                in_first_lane = self.region_checker.is_point_in_polygon(
+                    self.vehicle_dictionary[idx]['lp_center'][-1], self.region_checker.lane_1_area)
+                in_second_lane = self.region_checker.is_point_in_polygon(
+                    self.vehicle_dictionary[idx]['lp_center'][-1], self.region_checker.lane_2_area)
+                in_third_lane = self.region_checker.is_point_in_polygon(
+                    self.vehicle_dictionary[idx]['lp_center'][-1], self.region_checker.lane_3_area)
                 if in_first_lane:
                     self.vehicle_dictionary[idx]['lane'] = 1
                 elif in_second_lane:
@@ -357,8 +376,10 @@ class ObjectTracker:
 
             # Getting ground truth frame index, lane, speed
             if int(self.vehicle_dictionary[idx]['gt_speed']) <= 0 and len(self.vehicle_dictionary[idx]['lp_center_reconstructed']) != 0:
-                avg_detected_frame = int(np.average(self.vehicle_dictionary[idx]['lp_detected_frames']))
-                gt_speed, gt_lane, gt_iframe = self.gt_speed_handler.get_vehicle_gt_params(self.vehicle_dictionary[idx]['lane'], avg_detected_frame)
+                avg_detected_frame = int(np.average(
+                    self.vehicle_dictionary[idx]['lp_detected_frames']))
+                gt_speed, gt_lane, gt_iframe = self.gt_speed_handler.get_vehicle_gt_params(
+                    self.vehicle_dictionary[idx]['lane'], avg_detected_frame)
                 self.vehicle_dictionary[idx]['gt_speed'] = gt_speed
                 self.vehicle_dictionary[idx]['gt_lane'] = gt_lane
                 self.vehicle_dictionary[idx]['gt_iframe'] = gt_iframe
@@ -366,8 +387,10 @@ class ObjectTracker:
             # Check if the vehicle is stationary
             self.vehicle_dictionary[idx]['stationary'] = False
             if len(self.vehicle_dictionary[idx]['vd_center']) > 1:
-                mid_diff_x = np.abs(center[0] - self.vehicle_dictionary[idx]['vd_center'][-1][0])
-                mid_diff_y = np.abs(center[1] - self.vehicle_dictionary[idx]['vd_center'][-1][1])
+                mid_diff_x = np.abs(
+                    center[0] - self.vehicle_dictionary[idx]['vd_center'][-1][0])
+                mid_diff_y = np.abs(
+                    center[1] - self.vehicle_dictionary[idx]['vd_center'][-1][1])
                 if 4 > ((mid_diff_x+mid_diff_y)/2):
                     self.vehicle_dictionary[idx]['stationary'] = True
                     self.vehicle_dictionary[idx]['was_stationary'] = True
@@ -402,10 +425,11 @@ class OCR:
     """Class for optical character recognition"""
 
     def __init__(self):
-        self.config =load_config()
+        self.config = load_config()
         self.config_multi = load_config("ocr_config_multirow.yaml")
         self.single_net = create_network(source='./OCR/singlerow_model.pth')
-        self.multi_net = create_network_multi(source='./OCR/multirow_model.pth')
+        self.multi_net = create_network_multi(
+            source='./OCR/multirow_model.pth')
 
     def read_license_plate(self, cropped_lp: np.ndarray, lp_type: str):
         """Reading license plate characters.
@@ -423,10 +447,10 @@ class OCR:
         self.multi_net.eval()
         mean = torch.mean(cropped_lp_tensor, dim=[1, 2])
         std = torch.std(cropped_lp_tensor, dim=[1, 2])
-        transform_single = transforms.Compose([transforms.Resize([self.config["data"]["img_target_height"],self.config["data"]["img_target_width"]], antialias=True),
-                                        transforms.Normalize(mean, std)])
-        transform_multi = transforms.Compose([transforms.Resize([self.config_multi["data"]["img_target_height"],self.config_multi["data"]["img_target_width"]], antialias=True),
-                                        transforms.Normalize(mean, std)])       
+        transform_single = transforms.Compose([transforms.Resize([self.config["data"]["img_target_height"], self.config["data"]["img_target_width"]], antialias=True),
+                                               transforms.Normalize(mean, std)])
+        transform_multi = transforms.Compose([transforms.Resize([self.config_multi["data"]["img_target_height"], self.config_multi["data"]["img_target_width"]], antialias=True),
+                                              transforms.Normalize(mean, std)])
 
         if lp_type == "single":
             with torch.inference_mode():
@@ -443,7 +467,8 @@ class OCR:
                 outputs = self.multi_net(inputs)
 
         _, predicted = torch.max(outputs, dim=0)
-        predicted_wo_encoding = [(self.config["data"]["classes"][idx]) for idx in predicted]
+        predicted_wo_encoding = [
+            (self.config["data"]["classes"][idx]) for idx in predicted]
         predicted_wo_encoding_str = ''.join(predicted_wo_encoding)
 
         return predicted_wo_encoding_str
@@ -451,13 +476,15 @@ class OCR:
 
 class DepthCalculator:
     """Depth calculator in the image."""
+
     def __init__(self):
         self.real_sensor_resolution_w = 3280
         self.img_width_pixel = 1920
         self.resolution_ratio_w = self.real_sensor_resolution_w / self.img_width_pixel
         self.focal_length_mm = 3.04
         self.sensor_width = 3.68
-        self.focal_length_pixel_x = ((self.focal_length_mm/self.sensor_width) * self.img_width_pixel) / self.resolution_ratio_w # 928.44
+        self.focal_length_pixel_x = ((self.focal_length_mm/self.sensor_width)
+                                     * self.img_width_pixel) / self.resolution_ratio_w  # 928.44
 
         # self.sensor_height = 2.76
         # self.img_height_pixel = 1080
@@ -478,7 +505,7 @@ class DepthCalculator:
         self.iter = 1
 
     @staticmethod
-    def get_license_plate_depth(cropped_lp_depth_map:np.ndarray):
+    def get_license_plate_depth(cropped_lp_depth_map: np.ndarray):
         """Depth outlier filtering.
 
         Args:
@@ -491,7 +518,7 @@ class DepthCalculator:
 
         return lp_depth
 
-    def get_3D_coordinates(self, depth_map:np.ndarray, u:int, v:int, z:int):
+    def get_3D_coordinates(self, depth_map: np.ndarray, u: int, v: int, z: int):
         """Get the 3D coordinates of an object on the image given its depth map.
 
         Args:
@@ -510,7 +537,7 @@ class DepthCalculator:
 
         return [np.float16(x), np.float16(y), np.float16(z)]
 
-    def normalize_depth_map(self, depth_map:np.ndarray, scaling_ratio:float = 1.0, method:str = 'scaling'):
+    def normalize_depth_map(self, depth_map: np.ndarray, scaling_ratio: float = 1.0, method: str = 'scaling'):
         """Depth map normalization.
 
         Args:
@@ -524,7 +551,7 @@ class DepthCalculator:
         Returns:
             depth_map_modified(np.ndarray): Normalized depth map.
         """
-   
+
         # Rejection of lower and upper 1%
         lower_threshold = np.percentile(depth_map, 1)
         upper_threshold = np.percentile(depth_map, 99)
@@ -532,13 +559,12 @@ class DepthCalculator:
         # mask = (depth_map >= lower_threshold) & (depth_map <= upper_threshold)
         # depth_map[~mask] = np.nan
 
-
         # depth_map[depth_map < lower_threshold] = lower_threshold
         # depth_map[depth_map > upper_threshold] = upper_threshold
 
-        
         if method == 'normalizing':
-            depth_map_modified = ((depth_map-np.min(depth_map))*(self.max_distance-self.min_distance))/(np.max(depth_map)-np.min(depth_map)) + self.min_distance
+            depth_map_modified = ((depth_map-np.min(depth_map))*(self.max_distance-self.min_distance))/(
+                np.max(depth_map)-np.min(depth_map)) + self.min_distance
 
             # plt.hist(depth_map_normalized, bins=[2.9, 4])
             # # plt.show()
@@ -554,12 +580,12 @@ class DepthCalculator:
             depth_map_modified = depth_map*scaling_ratio
 
         else:
-            raise ValueError("method can be either 'scaling' or 'normalizing' but got {}".format(method))
-
+            raise ValueError(
+                "method can be either 'scaling' or 'normalizing' but got {}".format(method))
 
         return depth_map_modified
-    
-    def get_scaling_ratio(self, depth_map:np.ndarray):
+
+    def get_scaling_ratio(self, depth_map: np.ndarray):
         """Scaling ratio calculator.
 
         Args:
@@ -577,17 +603,21 @@ class DepthCalculator:
         z_1 = np.average(depth_map[v_1-5:v_1+5, u_1-5:u_1+5])
         x_1 = (u_1*z_1 - px*z_1) / self.focal_length_pixel_x
         y_1 = (v_1*z_1 - py*z_1) / self.focal_length_pixel_x
-        ref_point_reconstructed_1 = np.array([np.float16(x_1), np.float16(y_1), np.float16(z_1)])
+        ref_point_reconstructed_1 = np.array(
+            [np.float16(x_1), np.float16(y_1), np.float16(z_1)])
 
         u_2 = self.ref_point_2[0]
         v_2 = self.ref_point_2[1]
         z_2 = np.average(depth_map[v_2-5:v_2+5, u_2-5:u_2+5])
         x_2 = (u_2*z_2 - px*z_2) / self.focal_length_pixel_x
         y_2 = (v_2*z_2 - py*z_2) / self.focal_length_pixel_x
-        ref_point_reconstructed_2 = np.array([np.float16(x_2), np.float16(y_2), np.float16(z_2)])
+        ref_point_reconstructed_2 = np.array(
+            [np.float16(x_2), np.float16(y_2), np.float16(z_2)])
 
-        ref_point_reconstructed_distance = np.float16(np.sqrt(np.sum((ref_point_reconstructed_1-ref_point_reconstructed_2)**2)))
-        scaling_ratio = np.float16(self.ref_distance_irl/ref_point_reconstructed_distance)
+        ref_point_reconstructed_distance = np.float16(
+            np.sqrt(np.sum((ref_point_reconstructed_1-ref_point_reconstructed_2)**2)))
+        scaling_ratio = np.float16(
+            self.ref_distance_irl/ref_point_reconstructed_distance)
 
         self.scaling_ratios = np.append(self.scaling_ratios, scaling_ratio)
         if self.scaling_ratios.size % 40 == 0:
@@ -597,24 +627,25 @@ class DepthCalculator:
                 self.avg_scaling_ratio = self.avg_running_scaling_ratio
                 print("AVG RATIO CHANGED", self.avg_scaling_ratio)
             else:
-                self.avg_scaling_ratio = np.average([self.avg_running_scaling_ratio, self.avg_scaling_ratio])
+                self.avg_scaling_ratio = np.average(
+                    [self.avg_running_scaling_ratio, self.avg_scaling_ratio])
                 print("AVG RATIO CHANGED", self.avg_scaling_ratio)
             self.threshold = self.avg_scaling_ratio*0.5
-            
-        
+
         if self.avg_scaling_ratio != 0:
             if not (self.scaling_ratios[-1] >= self.avg_scaling_ratio - self.threshold) & (self.scaling_ratios[-1] <= self.avg_scaling_ratio + self.threshold):
                 self.scaling_ratios = self.scaling_ratios[:-1]
                 skip_frame = True
                 print(scaling_ratio)
-        
+
         self.iter += 1
 
         return scaling_ratio, skip_frame
-    
 
-class DepthEstimatorZoe:
+
+class DepthEstimatorZoeDepth:
     """Depth map estimation using ZoeDepth"""
+
     def __init__(self, depth_calculator: DepthCalculator):
         """
 
@@ -641,13 +672,15 @@ class DepthEstimatorZoe:
         """
         img = Image.fromarray(input_frame)
         input_img = img.convert("RGB")
-        depth_map = self.zoe.infer_pil(input_img, pad_input = False, with_flip_aug = False)
+        depth_map = self.zoe.infer_pil(
+            input_img, pad_input=False, with_flip_aug=False)
 
         return depth_map
 
 
 class DepthEstimatorAdabins:
     """Depth map estimation using AdaBins"""
+
     def __init__(self, depth_calculator: DepthCalculator):
         """
 
@@ -667,17 +700,71 @@ class DepthEstimatorAdabins:
             depth_map(np.array): Estimated depth map.
         """
         img = Image.fromarray(input_frame)
-        input_img = img.resize((640,480)).convert("RGB")
+        input_img = img.resize((640, 480)).convert("RGB")
         bin_centers, depth_map = self.infer_helper.predict_pil(input_img)
         depth_map = depth_map[0, 0, :, :]
-        depth_map_resized = Image.fromarray(depth_map).resize((1920,1080))
+        depth_map_resized = Image.fromarray(depth_map).resize((1920, 1080))
         depth_map_array = np.array(depth_map_resized)
 
         return depth_map_array
-     
+
+
+class DepthEstimatorDepthAnything:
+    """Depth map estimation using Depth Anything"""
+
+    def __init__(self, depth_calculator: DepthCalculator, encoder: str):
+        """
+
+        Args:
+            depth_calculator (DepthCalculator): depth calculator object
+            encoder (str): encoder model to use ('vits' or 'vitb' or 'vitl')
+        """
+        self.depth_calculator = depth_calculator
+        self.encoder = encoder
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        os.chdir(os.path.join(os.getcwd(), "Depth_Anything"))
+        self.model = DepthAnything.from_pretrained(
+            'LiheYoung/depth_anything_{:}14'.format(encoder)).to(device=self.device).eval()
+        self.transform = Compose([Resize(
+            width=518,
+            height=518,
+            resize_target=False,
+            keep_aspect_ratio=True,
+            ensure_multiple_of=14,
+            resize_method='lower_bound',
+            image_interpolation_method=cv2.INTER_CUBIC,),
+            NormalizeImage(mean=[0.485, 0.456, 0.406],
+                           std=[0.229, 0.224, 0.225]),
+            PrepareForNet(),])
+        os.chdir(os.path.join(os.getcwd(), ".."))
+
+    def create_depth_map(self, input_frame: np.ndarray):
+        """Estimate a depth map using AdaBins.
+
+        Args:
+            input_frame (np.ndarray): Input RGB frame to estimate depth map from.
+
+        Returns:
+            depth_map(np.array): Estimated depth map.
+        """
+        input_img = cv2.cvtColor(input_frame, cv2.COLOR_BGR2RGB) / 255.0
+        input_img = self.transform({'image': input_img})['image']
+        input_img = torch.from_numpy(input_img).unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            disparity = self.model(input_img)
+        disparity_map_array = disparity.cpu().numpy()
+        disparity_map_array = disparity_map_array[0, :, :]
+        disparity_map_array_resized = Image.fromarray(
+            disparity_map_array).resize((1920, 1080))
+        disparity_map_array = np.array(disparity_map_array_resized)
+        depth_map_array = 1/disparity_map_array
+
+        return depth_map_array
+
 
 class LicensePlateDetector:
     """License plate detection."""
+
     def __init__(self, oc_recognizer: OCR, depth_estimator, depth_calculator: DepthCalculator, region_checker: RegionChecker):
         """
         Args:
@@ -728,27 +815,36 @@ class LicensePlateDetector:
                 break
 
             if vehicle_dictionary[idx]['vd_tracked'] and not vehicle_dictionary[idx]['stationary']:
-                lp_preds = self.model_lp(cropped_vehicle, imgsz=640, iou=0.5, verbose = False)
-                cls_array = []
-                for result in lp_preds: # Get predictions
+                lp_preds = self.model_lp(
+                    cropped_vehicle, imgsz=640, iou=0.5, verbose=False)
+                for result in lp_preds:  # Get predictions
                     if len(result) > 0 and not self.depth_estimation_ran:
-                        depth_map_out = self.depth_estimator.create_depth_map(frame)
-                        # plt.imshow(depth_map_out, cmap='magma')
-                        # plt.colorbar(label='Depth')
-                        # plt.show()
-                        scaling_ratio, self.skip_frame = self.depth_calculator.get_scaling_ratio(depth_map_out)                        
+                        depth_map_out = self.depth_estimator.create_depth_map(
+                            frame)
+
+                        scaling_ratio, self.skip_frame = self.depth_calculator.get_scaling_ratio(
+                            depth_map_out)
                         if self.skip_frame:
                             print("Frame skipped because of incorrect depth map")
                             break
-                        depth_map = self.depth_calculator.normalize_depth_map(depth_map_out, scaling_ratio, method='normalizing')
+                        depth_map = self.depth_calculator.normalize_depth_map(
+                            depth_map_out, scaling_ratio, method='normalizing')
 
-                        # plt.imshow(depth_map, cmap='magma')
-                        # plt.colorbar(label='Depth')
+                        # fig, ax = plt.subplots(figsize=(10, 8))  # Adjust the values (width, height) for the figure
+                        # ax.set_xticks([])
+                        # ax.set_yticks([])
+                        # ax.set_xticklabels([])
+                        # ax.set_yticklabels([])
+                        # im = plt.imshow(depth_map, cmap='magma')
+                        # cbar = plt.colorbar(im, orientation='horizontal', pad=0.05, shrink=0.7)
+                        # cbar.set_label('Depth [m]', fontsize=28)
+                        # cbar.ax.tick_params(labelsize=28)  # Adjust the labelsize as needed
                         # plt.show()
+
                         self.depth_estimation_ran = True
-                    boxes = result.boxes # Get bounding boxes
-                    for box in boxes: # Iterate through bounding boxes
-                        if len(box.xyxy[0]) != 0: # Empty bounding box check
+                    boxes = result.boxes  # Get bounding boxes
+                    for box in boxes:  # Iterate through bounding boxes
+                        if len(box.xyxy[0]) != 0:  # Empty bounding box check
                             cls = int(box.cls[0])
                             if cls == 0:
                                 vehicle_dictionary[idx]['lp_type'] = "single"
@@ -766,27 +862,38 @@ class LicensePlateDetector:
                                 cropped_vehicle[y1_lp:y2_lp, x1_lp:x2_lp])
                             conf = math.ceil((box.conf[0]*100))/100
                             vehicle_dictionary[idx]['lp_conf'] = conf
-                            vehicle_dictionary[idx]['lp_center'].append(lp_center)
+                            vehicle_dictionary[idx]['lp_center'].append(
+                                lp_center)
 
-                            lp_text = self.oc_recognizer.read_license_plate(cropped_lp, vehicle_dictionary[idx]['lp_type'])
+                            lp_text = self.oc_recognizer.read_license_plate(
+                                cropped_lp, vehicle_dictionary[idx]['lp_type'])
                             vehicle_dictionary[idx]['lp_texts'].append(lp_text)
                             if len(vehicle_dictionary[idx]['lp_texts']) > 3:
                                 lp_texts = vehicle_dictionary[idx]['lp_texts']
-                                stripped_texts = [lp_texts.strip() for lp_texts in lp_texts]
+                                stripped_texts = [lp_texts.strip()
+                                                  for lp_texts in lp_texts]
                                 counter = Counter(stripped_texts)
-                                most_common_string = counter.most_common(1)[0][0]
+                                most_common_string = counter.most_common(1)[
+                                    0][0]
                                 vehicle_dictionary[idx]['lp_text'] = most_common_string
 
-                            cropped_vehicle_depth_map = np.array(depth_map[bbox_vd[1]:bbox_vd[3], bbox_vd[0]:bbox_vd[2]])
-                            cropped_lp_depth_map = np.array(cropped_vehicle_depth_map[y1_lp:y2_lp, x1_lp:x2_lp])
-                            lp_depth = self.depth_calculator.get_license_plate_depth(cropped_lp_depth_map)
-                            vehicle_dictionary[idx]['lp_detected_frames'].append(iter)
+                            cropped_vehicle_depth_map = np.array(
+                                depth_map[bbox_vd[1]:bbox_vd[3], bbox_vd[0]:bbox_vd[2]])
+                            cropped_lp_depth_map = np.array(
+                                cropped_vehicle_depth_map[y1_lp:y2_lp, x1_lp:x2_lp])
+                            lp_depth = self.depth_calculator.get_license_plate_depth(
+                                cropped_lp_depth_map)
+                            vehicle_dictionary[idx]['lp_detected_frames'].append(
+                                iter)
 
-                            is_point_in_meas_area = self.region_checker.is_point_in_polygon((lp_center[0], lp_center[1]), self.region_checker.speed_measurement_area)
+                            is_point_in_meas_area = self.region_checker.is_point_in_polygon(
+                                (lp_center[0], lp_center[1]), self.region_checker.speed_measurement_area)
                             vehicle_dictionary[idx]['in_measurement_area'] = is_point_in_meas_area
                             if is_point_in_meas_area and vehicle_dictionary[idx]['lp_tracked']:
-                                world_coordinates = self.depth_calculator.get_3D_coordinates(depth_map, lp_center[0], lp_center[1], lp_depth)
-                                vehicle_dictionary[idx]['lp_center_reconstructed'].append(world_coordinates)
+                                world_coordinates = self.depth_calculator.get_3D_coordinates(
+                                    depth_map, lp_center[0], lp_center[1], lp_depth)
+                                vehicle_dictionary[idx]['lp_center_reconstructed'].append(
+                                    world_coordinates)
 
                             # if vehicle_dictionary[idx]['lp_tracked']:
                             #     cv2.imshow(
@@ -798,8 +905,8 @@ class LicensePlateDetector:
                             #     cv2.destroyWindow(str(idx) + " license plate")
                             #     vehicle_dictionary[idx]['tracking_window_opened'] = False
 
-                            break # Take only the first license plate detection if duplicates are found
-                    break # Take only the first license plate detection if duplicates are found
+                            break  # Take only the first license plate detection if duplicates are found
+                    break  # Take only the first license plate detection if duplicates are found
 
         return vehicle_dictionary, self.skip_frame
 
@@ -826,15 +933,15 @@ class SpeedEstimator:
         """
         for idx in vehicle_dictionary.keys():
             if vehicle_dictionary[idx]['lp_tracked'] and len(vehicle_dictionary[idx]['lp_center_reconstructed']) >= 2 and vehicle_dictionary[idx]['in_measurement_area']:
-                src = np.array([vehicle_dictionary[idx]['lp_center_reconstructed'][-2][0], 
-                                   vehicle_dictionary[idx]['lp_center_reconstructed'][-2][1], 
-                                   vehicle_dictionary[idx]['lp_center_reconstructed'][-2][2]])
-                dst = np.array([vehicle_dictionary[idx]['lp_center_reconstructed'][-1][0], 
-                                    vehicle_dictionary[idx]['lp_center_reconstructed'][-1][1], 
-                                    vehicle_dictionary[idx]['lp_center_reconstructed'][-1][2]])
+                src = np.array([vehicle_dictionary[idx]['lp_center_reconstructed'][-2][0],
+                                vehicle_dictionary[idx]['lp_center_reconstructed'][-2][1],
+                                vehicle_dictionary[idx]['lp_center_reconstructed'][-2][2]])
+                dst = np.array([vehicle_dictionary[idx]['lp_center_reconstructed'][-1][0],
+                                vehicle_dictionary[idx]['lp_center_reconstructed'][-1][1],
+                                vehicle_dictionary[idx]['lp_center_reconstructed'][-1][2]])
                 travelled_distance = np.float16(np.sqrt(np.sum((dst-src)**2)))
-                vehicle_dictionary[idx]['travelled_distance'].append(travelled_distance)
-
+                vehicle_dictionary[idx]['travelled_distance'].append(
+                    travelled_distance)
 
         return vehicle_dictionary
 
@@ -852,22 +959,24 @@ class SpeedEstimator:
         final_speed = 0
         for idx in vehicle_dictionary.keys():
             if len(vehicle_dictionary[idx]['travelled_distance']) != 0 and vehicle_dictionary[idx]['lp_tracked'] and vehicle_dictionary[idx]['in_measurement_area']:
-                speed = np.float16((vehicle_dictionary[idx]['travelled_distance'][-1] / ((vehicle_dictionary[idx]['lp_detected_frames'][-1]-vehicle_dictionary[idx]['lp_detected_frames'][-2])/self.fps))*3.6)
+                speed = np.float16((vehicle_dictionary[idx]['travelled_distance'][-1] / (
+                    (vehicle_dictionary[idx]['lp_detected_frames'][-1]-vehicle_dictionary[idx]['lp_detected_frames'][-2])/self.fps))*3.6)
                 if len(vehicle_dictionary[idx]['speeds']) >= 3:
                     avg_speed = np.average(vehicle_dictionary[idx]['speeds'])
                     upper_limit = avg_speed*1.05
                     lower_limit = avg_speed*0.95
-                    speed = np.float16(max(lower_limit, min(speed, upper_limit)))
+                    speed = np.float16(
+                        max(lower_limit, min(speed, upper_limit)))
                 vehicle_dictionary[idx]['speeds'].append(speed)
                 if len(vehicle_dictionary[idx]['speeds']) >= 3:
                     final_speed = np.average(vehicle_dictionary[idx]['speeds'])
                     vehicle_dictionary[idx]['predicted_speed'] = final_speed
             if vehicle_dictionary[idx]['predicted_speed'] != 0 and vehicle_dictionary[idx]['vd_tracked']:
                 cv2.putText(frame, str(int(np.round(vehicle_dictionary[idx]['predicted_speed']))) + " km/h", (vehicle_dictionary[idx]['vd_bbox_coords'][2],
-                                                            vehicle_dictionary[idx]['vd_bbox_coords'][3]), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 165, 0), 2)
-                # cv2.putText(frame, str(int(np.round(float(vehicle_dictionary[idx]['gt_speed'])))) + " km/h", (vehicle_dictionary[idx]['vd_bbox_coords'][2],
-                #                                             vehicle_dictionary[idx]['vd_bbox_coords'][3]+40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
-                                        
+                                                                                                              vehicle_dictionary[idx]['vd_bbox_coords'][3]), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 165, 0), 2)
+                cv2.putText(frame, str(int(np.round(float(vehicle_dictionary[idx]['gt_speed'])))) + " km/h", (vehicle_dictionary[idx]['vd_bbox_coords'][2],
+                                                                                                              vehicle_dictionary[idx]['vd_bbox_coords'][3]+40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+
         return vehicle_dictionary
 
 
@@ -894,7 +1003,7 @@ class IOHandler:
             cv2.waitKey(0)
         if cv2.waitKey(10) & 0xFF == ord('q') or not ret:
             self.terminate = True
-        
+
         return self.terminate
 
     def write_results(self, vehicle_dictionary: Dict):
@@ -905,12 +1014,14 @@ class IOHandler:
         """
         if self.terminate:
             df = pd.DataFrame.from_dict(vehicle_dictionary, orient='index')
-            df['predicted_speed'] = df['predicted_speed'].apply(lambda x: "{:.2f}".format(x))
+            df['predicted_speed'] = df['predicted_speed'].apply(
+                lambda x: "{:.2f}".format(x))
             df['gt_speed'] = df['gt_speed'].apply(lambda x: "{:.2f}".format(x))
-            df['lp_first_detected_frame'] = df['lp_detected_frames'].apply(lambda x: x[0] if x else None)
-            df.to_excel('speed_estimation_results.xlsx', columns=['lane', 'gt_lane', 'predicted_speed', 'gt_speed', 'lp_first_detected_frame', 'gt_iframe', 'was_stationary'])
+            df['lp_first_detected_frame'] = df['lp_detected_frames'].apply(
+                lambda x: x[0] if x else None)
+            df.to_excel('speed_estimation_results.xlsx', columns=[
+                        'lane', 'gt_lane', 'predicted_speed', 'gt_speed', 'lp_first_detected_frame', 'gt_iframe', 'was_stationary'])
 
-    
     def end_stream(self):
         """Ending the video stream."""
         if self.terminate:
@@ -918,15 +1029,20 @@ class IOHandler:
             cv2.destroyAllWindows()
             sys.exit()
 
-            
+
 def main():
     parser = argparse.ArgumentParser(description="Traffic Speed Camera Script")
 
-    parser.add_argument("--input_path", default=r"./samples/ocr_sample.MOV", help="Path to the input media")
-    parser.add_argument("--xml_input_path", default=r"vehicles.xml", help="Path to the speed measurement benchmark XML file")
-    parser.add_argument("--input_mode", default="video", choices=["video", "burst_photos"], help="Input mode (video or burst_photos)")
-    parser.add_argument("--fps", type=float, default=30.15, help="Frames per second of the input video")
-    parser.add_argument("--depth_estimator_algorithm", default="zoe", choices=["zoe", "adabins"], help="Depth estimator algorithm used")
+    parser.add_argument(
+        "--input_path", default=r"C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run1\JPEG", help="Path to the input media")
+    parser.add_argument("--xml_input_path", default=r"vehicles.xml",
+                        help="Path to the speed measurement benchmark XML file")
+    parser.add_argument("--input_mode", default="burst_photos", choices=[
+                        "video", "burst_photos"], help="Input mode (video or burst_photos)")
+    parser.add_argument("--fps", type=float, default=30.15,
+                        help="Frames per second of the input video")
+    parser.add_argument("--depth_estimator_algorithm", default="adabins", choices=[
+                        "zoedepth", "adabins", "depth_anything"], help="Depth estimator algorithm used")
 
     args = parser.parse_args()
 
