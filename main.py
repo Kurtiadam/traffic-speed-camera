@@ -167,7 +167,7 @@ class RegionChecker:
             self.invalid_detection_area = np.array([
                 [0, 180], [1450, 170], [1920, 775], [1920, 0], [0, 0]])
         elif speed_benchmark == "ue5":
-            self.speed_measurement_area = np.array([[0, 290], [1920, 315], [1920, 575], [0, 590]])
+            self.speed_measurement_area = np.array([[0, 200], [1920, 200], [1920, 770], [0, 770]])
             self.lane_1_area = np.array([[650, 0], [850, 0], [520, 1080], [0, 1080], [0, 750]])
             self.lane_2_area = np.array([[850, 0], [1060, 0], [1310, 1080], [500, 1080]])
             self.lane_3_area = np.array([[1060, 0], [1270, 0], [1920, 780], [1920, 1080], [1310, 1080]])
@@ -257,8 +257,7 @@ class GTHandler:
             with open(self.speed_gts_path, 'r') as file:
                 for line in file:
                     match = re.search(self.pattern, line)
-
-                    if match:
+                    if match and int(match.group(4)) == lane:
                         entering_frame = int(match.group(2))
                         diff = abs(int(entering_frame) - int(iframe))
 
