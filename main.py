@@ -300,6 +300,10 @@ class VehicleDetector:
             boxes = result.boxes
             for box in boxes:
                 x1_vd, y1_vd, x2_vd, y2_vd = tuple(map(int, box.xyxy[0]))
+                x1_vd = int(min(x1_vd - frame.shape[1]/100, frame.shape[1]))
+                y1_vd = int(min(y1_vd - frame.shape[0]/100, frame.shape[0]))
+                x2_vd = int(min(x2_vd + frame.shape[1]/100, frame.shape[1]))
+                y2_vd = int(min(y2_vd + frame.shape[0]/100, frame.shape[0]))
                 mid_vd = ((x2_vd + x1_vd) / 2, (y2_vd + y1_vd) / 2)
 
                 in_invalid_area = self.region_checker.is_point_in_polygon(
