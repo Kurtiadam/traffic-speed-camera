@@ -1,11 +1,10 @@
-from Depth_Anything.depth_anything.util.transform import Resize, NormalizeImage, PrepareForNet
-from Depth_Anything.depth_anything.dpt import DepthAnything
 from ultralytics import YOLO
 import cv2
 import argparse
 import numpy as np
 import math
 import time
+import re
 from sort import *
 import os
 import sys
@@ -25,16 +24,18 @@ import matplotlib.path as mplPath
 depth_anything_dir = os.path.abspath(os.path.join(
     os.path.dirname(__file__), "Depth_Anything"))
 sys.path.append(depth_anything_dir)
+from Depth_Anything.depth_anything.util.transform import Resize, NormalizeImage, PrepareForNet
+from Depth_Anything.depth_anything.dpt import DepthAnything
 
 
 class TrafficSpeedCamera:
     """Class for running the speed camera algorithm"""
 
-    def __init__(self, input_path: str, xml_input_path: str, input_mode: str, fps: float = 30, depth_estimator_algorithm: str = "zoe"):
+    def __init__(self, input_path: str, speed_gts_path: str, input_mode: str, fps: float = 30, depth_estimator_algorithm: str = "zoe"):
         """
         Args:
             input_path (str): Path to the input file or directory.
-            xml_input_path (str): Path to the XML ground truth file used to benchmark the speed estimation algorithm.
+            speed_gts_path (str): Path to the XML ground truth file used to benchmark the speed estimation algorithm.
             input_mode (str): Input mode, either "burst_photos" or "video".
             fps (int, optional): Frames per second of the source. Defaults to 30.
             depth_estimator_algorithm (str, optional): The monocular depth estimation algorithm to use. "zoe" or "adabins". Defaults to "zoe".
@@ -59,7 +60,7 @@ class TrafficSpeedCamera:
 
         self.license_plate_detector = LicensePlateDetector(
             self.oc_recognizer, self.depth_estimator, self.depth_calculator, self.region_checker)
-        self.gt_speed_handler = GTHandler(xml_input_path)
+        self.gt_speed_handler = GTHandler(speed_gts_path)
         self.object_tracker = ObjectTracker(
             self.region_checker, self.gt_speed_handler)
         self.speed_estimator = SpeedEstimator(fps)
@@ -88,11 +89,11 @@ class TrafficSpeedCamera:
                 self.speed_estimator.estimate_speed(
                     show_frame, vehicle_dictionary_lp)
 
-            # for key, value in vehicle_dictionary_lp.items():
-            #     print("\n" + str(key))
-            #     for subkey, subvalue in value.items():
-            #         print(subkey, subvalue)
-            # print("----------------------------------------------------------------------")
+            for key, value in vehicle_dictionary_lp.items():
+                print("\n" + str(key))
+                for subkey, subvalue in value.items():
+                    print(subkey, subvalue)
+            print("----------------------------------------------------------------------")
 
         self.measure_fps(show_frame)
         cv2.imshow("Frame", show_frame)
@@ -186,15 +187,26 @@ class RegionChecker:
 class GTHandler:
     """Ground truth extractor for speed estimation benchmarking."""
 
-    def __init__(self, xml_input_path: str):
+    def __init__(self, speed_gts_path: str):
         """
 
         Args:
-            xml_input_path (str): XML file path.
+            speed_gts_path (str): Relative path of the file containing the ground truth speed data. (.XML or .TXT)
         """
-        with open(xml_input_path, 'r') as file:
-            xml_content = file.read()
-        self.root = ET.fromstring(xml_content)
+        self.speed_gts_path = speed_gts_path
+        if speed_gts_path.endswith(".xml"):
+            self.file_type = ".xml"
+        elif speed_gts_path.endswith(".txt"):
+            self.file_type = ".txt"
+        else:
+            ValueError(f"Only .txt and .xml extensions are supported, but got {os.extsep(speed_gts_path)[-1]}.")
+        
+        if self.file_type == ".xml": 
+            with open(speed_gts_path, 'r') as file:
+                xml_content = file.read()
+            self.root = ET.fromstring(xml_content)
+        elif self.file_type == ".txt":
+            self.pattern = r'speed: (\d+\.\d+) km/h , entering frame: (\d+), leaving frame: (\d+) , lane (\d+)\.'
 
     def get_vehicle_gt_params(self, lane: int, iframe: int):
         """Get a vehicles parameters like ground truth speed and ground truth lane according to the given input values.
@@ -211,27 +223,49 @@ class GTHandler:
         lane_gt = -1
         gt_iframe = -1
 
-        for idx, vehicle in enumerate(self.root.find('gtruth')):
-            if int(vehicle.attrib['lane']) == lane:
-                diff = abs(int(vehicle.attrib['iframe']) - int(iframe))
+        if self.file_type == ".xml":
+            for _, vehicle in enumerate(self.root.find('gtruth')):
+                if int(vehicle.attrib['lane']) == lane:
+                    diff = abs(int(vehicle.attrib['iframe']) - int(iframe))
 
-                if diff < min_diff:
-                    min_diff = diff
-                    lane_gt = vehicle.attrib['lane']
-                    gt_iframe = vehicle.attrib['iframe']
+                    if diff < min_diff:
+                        min_diff = diff
+                        lane_gt = vehicle.attrib['lane']
+                        gt_iframe = vehicle.attrib['iframe']
 
-                    if vehicle.attrib['radar'] == 'True':
-                        radar_element = vehicle.find('radar')
-                        speed_gt = radar_element.attrib['speed']
-                    else:
-                        # If GT is not given
-                        speed_gt = 0
+                        if vehicle.attrib['radar'] == 'True':
+                            radar_element = vehicle.find('radar')
+                            speed_gt = radar_element.attrib['speed']
+                        else:
+                            # If GT is not given
+                            speed_gt = 0
 
-                # If diff is too big, break
-                elif diff > 200:
-                    break
+                    # If diff is too big, break
+                    elif diff > 200:
+                        break
 
-        return np.float16(speed_gt), int(lane_gt), int(gt_iframe)
+            return np.float16(speed_gt), int(lane_gt), int(gt_iframe)
+        
+        elif self.file_type == ".txt":
+            with open(self.speed_gts_path, 'r') as file:
+                for line in file:
+                    match = re.search(self.pattern, line)
+
+                    if match:
+                        entering_frame = int(match.group(2))
+                        diff = abs(int(entering_frame) - int(iframe))
+
+                        if diff < min_diff:
+                            min_diff = diff
+                            lane_gt = int(match.group(4))
+                            gt_iframe = entering_frame
+                            speed_gt = float(match.group(1))
+
+                        # If diff is too big, break
+                        elif diff > 100:
+                            break
+                    
+                return np.float16(speed_gt), int(lane_gt), int(gt_iframe)
 
 
 class VehicleDetector:
@@ -1035,8 +1069,8 @@ def main():
 
     parser.add_argument(
         "--input_path", default=r"C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run1\JPEG", help="Path to the input media")
-    parser.add_argument("--xml_input_path", default=r"vehicles.xml",
-                        help="Path to the speed measurement benchmark XML file")
+    parser.add_argument("--speeds_gt_file_path", default=r"labels.txt",
+                        help="Path to the speed measurement benchmark file (.txt or .xml)")
     parser.add_argument("--input_mode", default="burst_photos", choices=[
                         "video", "burst_photos"], help="Input mode (video or burst_photos)")
     parser.add_argument("--fps", type=float, default=30.15,
@@ -1048,7 +1082,7 @@ def main():
 
     speed_camera = TrafficSpeedCamera(
         input_path=args.input_path,
-        xml_input_path=args.xml_input_path,
+        speed_gts_path=args.speeds_gt_file_path,
         input_mode=args.input_mode,
         fps=args.fps,
         depth_estimator_algorithm=args.depth_estimator_algorithm
