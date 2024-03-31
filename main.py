@@ -31,16 +31,17 @@ from Depth_Anything.depth_anything.dpt import DepthAnything
 class TrafficSpeedCamera:
     """Class for running the speed camera algorithm"""
 
-    def __init__(self, input_path: str, speed_gts_path: str, input_mode: str, fps: float = 30, depth_estimator_algorithm: str = "zoe"):
+    def __init__(self, input_path: str, speed_gts_path: str, speed_benchmark: str, input_mode: str, fps: float = 30, depth_estimator_algorithm: str = "zoe"):
         """
         Args:
             input_path (str): Path to the input file or directory.
-            speed_gts_path (str): Path to the XML ground truth file used to benchmark the speed estimation algorithm.
+            speed_gts_path (str): Path to the XML/TXT ground truth file used to benchmark the speed estimation algorithm.
+            speed_benchmark (str): Speed measurement benchmark to use, either "ue5" or "brazilian_road".
             input_mode (str): Input mode, either "burst_photos" or "video".
             fps (int, optional): Frames per second of the source. Defaults to 30.
             depth_estimator_algorithm (str, optional): The monocular depth estimation algorithm to use. "zoe" or "adabins". Defaults to "zoe".
         """
-        self.region_checker = RegionChecker()
+        self.region_checker = RegionChecker(speed_benchmark)
         self.depth_calculator = DepthCalculator()
         self.io_handler = IOHandler(input_path)
         self.vehicle_detector = VehicleDetector(self.region_checker)
@@ -157,21 +158,27 @@ class TrafficSpeedCamera:
 class RegionChecker:
     """Class for checking region of interests on the frame."""
 
-    def __init__(self) -> None:
-        self.speed_measurement_area = [
-            (0, 460), (1920, 370), (1920, 650), (0, 800), ]
-        self.lane_1_area = [(222, 9), (599, 8), (519, 1071), (0, 1072)]
-        self.lane_2_area = [(599, 9), (962, 8), (1349, 1067), (519, 1071)]
-        self.lane_3_area = [(962, 8), (1307, 12), (1920, 1075), (1349, 1067)]
-        self.invalid_detection_area = [
-            (0, 180), (1450, 170), (1920, 775), (1920, 0), (0, 0)]
+    def __init__(self, speed_benchmark:str) -> None:
+        if speed_benchmark == "brazilian_road":
+            self.speed_measurement_area = np.array([[0, 460], [1920, 370], [1920, 650], [0, 800]])
+            self.lane_1_area = np.array([[222, 9], [599, 8], [519, 1071], [0, 1072]])
+            self.lane_2_area = np.array([[599, 9], [962, 8], [1349, 1067], [519, 1071]])
+            self.lane_3_area = np.array([[962, 8], [1307, 12], [1920, 1075], [1349, 1067]])
+            self.invalid_detection_area = np.array([
+                [0, 180], [1450, 170], [1920, 775], [1920, 0], [0, 0]])
+        elif speed_benchmark == "ue5":
+            self.speed_measurement_area = np.array([[0, 290], [1920, 315], [1920, 575], [0, 590]])
+            self.lane_1_area = np.array([[650, 0], [850, 0], [520, 1080], [0, 1080], [0, 750]])
+            self.lane_2_area = np.array([[850, 0], [1060, 0], [1310, 1080], [500, 1080]])
+            self.lane_3_area = np.array([[1060, 0], [1270, 0], [1920, 780], [1920, 1080], [1310, 1080]])
+            self.invalid_detection_area = np.array([[1270, 0], [1920, 0], [1920, 780]])
 
-    def is_point_in_polygon(self, point: Tuple, polygon: list):
+    def is_point_in_polygon(self, point: Tuple, polygon: np.array):
         """Checks if a point is in a given polygon.
 
         Args:
             point (Tuple): Point to check.
-            polygon (list): Polygon to check.
+            polygon (np.array): Polygon to check.
 
         Returns:
             inside (bool): Whether the point is in the polygon or not.
@@ -1074,10 +1081,12 @@ def main():
     parser.add_argument(
         "--input_path", default=r"C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run1\JPEG", help="Path to the input media")
     parser.add_argument("--speeds_gt_file_path", default=r"labels.txt",
-                        help="Path to the speed measurement benchmark file (.txt or .xml)")
+                        help="Path to the speed measurement benchmark file (should be .txt or .xml file)")
+    parser.add_argument("--speed_benchmark", default="ue5", choices=[
+                        "ue5", "brazilian_road"], help="Which speed measurement benchmark should be used")
     parser.add_argument("--input_mode", default="burst_photos", choices=[
                         "video", "burst_photos"], help="Input mode (video or burst_photos)")
-    parser.add_argument("--fps", type=float, default=30.15,
+    parser.add_argument("--fps", type=float, default=30,
                         help="Frames per second of the input video")
     parser.add_argument("--depth_estimator_algorithm", default="adabins", choices=[
                         "zoedepth", "adabins", "depth_anything"], help="Depth estimator algorithm used")
@@ -1087,6 +1096,7 @@ def main():
     speed_camera = TrafficSpeedCamera(
         input_path=args.input_path,
         speed_gts_path=args.speeds_gt_file_path,
+        speed_benchmark=args.speed_benchmark,
         input_mode=args.input_mode,
         fps=args.fps,
         depth_estimator_algorithm=args.depth_estimator_algorithm
