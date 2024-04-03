@@ -42,7 +42,7 @@ class TrafficSpeedCamera:
             depth_estimator_algorithm (str, optional): The monocular depth estimation algorithm to use. "zoe" or "adabins". Defaults to "zoe".
         """
         self.region_checker = RegionChecker(speed_benchmark)
-        self.depth_calculator = DepthCalculator()
+        self.depth_calculator = DepthCalculator(speed_benchmark)
         self.io_handler = IOHandler(input_path)
         self.vehicle_detector = VehicleDetector(self.region_checker)
         self.oc_recognizer = OCR()
@@ -90,11 +90,11 @@ class TrafficSpeedCamera:
                 self.speed_estimator.estimate_speed(
                     show_frame, vehicle_dictionary_lp)
 
-            for key, value in vehicle_dictionary_lp.items():
-                print("\n" + str(key))
-                for subkey, subvalue in value.items():
-                    print(subkey, subvalue)
-            print("----------------------------------------------------------------------")
+            # for key, value in vehicle_dictionary_lp.items():
+            #     print("\n" + str(key))
+            #     for subkey, subvalue in value.items():
+            #         print(subkey, subvalue)
+            # print("----------------------------------------------------------------------")
 
         self.measure_fps(show_frame)
         cv2.imshow("Frame", show_frame)
@@ -117,16 +117,17 @@ class TrafficSpeedCamera:
                 frame = cv2.imread(image_path)
                 vehicle_dictionary = self.process_frame(frame, show_tracking)
                 self.io_handler.check_stream(ret)
-                self.io_handler.write_results(vehicle_dictionary)
-                self.io_handler.end_stream()
-            self.io_handler.terminate = False
+                if self.io_handler.terminate:
+                    self.io_handler.write_results(vehicle_dictionary)
+                    self.io_handler.end_stream()
+            self.io_handler.terminate = True
             self.io_handler.write_results(vehicle_dictionary)
             self.io_handler.end_stream()
 
         elif self.input_mode == "video":
             while ret:
                 ret, frame = self.io_handler.cap.read()
-                self.io_handler.terminate = self.io_handler.check_stream(ret)
+                self.io_handler.check_stream(ret)
                 if self.io_handler.terminate:
                     self.io_handler.write_results(vehicle_dictionary)
                     self.io_handler.end_stream()
@@ -521,27 +522,45 @@ class OCR:
 class DepthCalculator:
     """Depth calculator in the image."""
 
-    def __init__(self):
-        self.real_sensor_resolution_w = 3280
-        self.img_width_pixel = 1920
-        self.resolution_ratio_w = self.real_sensor_resolution_w / self.img_width_pixel
-        self.focal_length_mm = 3.04
-        self.sensor_width = 3.68
-        self.focal_length_pixel_x = ((self.focal_length_mm/self.sensor_width)
-                                     * self.img_width_pixel) / self.resolution_ratio_w  # 928.44
+    def __init__(self, speed_benchmark: str):
+        if speed_benchmark == "brazilian_road":
+            self.real_sensor_resolution_w = 3280
+            self.img_width_pixel = 1920
+            self.resolution_ratio_w = self.real_sensor_resolution_w / self.img_width_pixel
+            self.focal_length_mm = 3.04
+            self.sensor_width = 3.68
+            self.focal_length_pixel_x = ((self.focal_length_mm/self.sensor_width)
+                                        * self.img_width_pixel) / self.resolution_ratio_w  # 928.44
 
-        # self.sensor_height = 2.76
-        # self.img_height_pixel = 1080
-        # self.focal_length_pixel_y = (self.focal_length_mm/self.sensor_height) * self.img_height_pixel
+            # self.sensor_height = 2.76
+            # self.img_height_pixel = 1080
+            # self.focal_length_pixel_y = (self.focal_length_mm/self.sensor_height) * self.img_height_pixel
 
-        self.max_distance = 13.5
-        self.min_distance = 4
+            self.min_distance = 4
+            self.max_distance = 13.5
 
-        # self.ref_point_1 = np.array([1108, 248])
-        # self.ref_point_2 = np.array([1400, 251])
-        self.ref_point_1 = np.array([649, 262])
-        self.ref_point_2 = np.array([647, 43])
-        self.ref_distance_irl = 4.8
+            # self.ref_point_1 = np.array([1108, 248])
+            # self.ref_point_2 = np.array([1400, 251])
+            self.ref_point_1 = np.array([649, 262])
+            self.ref_point_2 = np.array([647, 43])
+            self.ref_distance_irl = 4.8
+        
+        if speed_benchmark == "ue5":
+            self.focal_length_mm = 30
+            self.sensor_width = 36
+            self.img_width_pixel = 1920
+            self.focal_length_pixel_x = (self.focal_length_mm/self.sensor_width) * self.img_width_pixel 
+            
+            self.sensor_height = 20.25
+            self.img_height_pixel = 1080
+            self.focal_length_pixel_y = (self.focal_length_mm/self.sensor_height) * self.img_height_pixel
+
+            self.min_distance = 5.7
+            self.max_distance = 30
+            self.ref_point_1 = np.array([1620, 151])
+            self.ref_point_2 = np.array([1820, 311])
+            self.ref_distance_irl = 4.4
+
         self.scaling_ratios = np.array([], dtype=np.float16)
         self.avg_running_scaling_ratio = 0
         self.avg_scaling_ratio = 0
@@ -572,28 +591,28 @@ class DepthCalculator:
             z (int): Objects depth from the depth map.
 
         Returns:
-            list(np.float16, np.float16, np.float16): 3D reconstructed coordinates.
+            np.array([x,y,z]): 3D reconstructed coordinates.
         """
         px = depth_map.shape[1]/2
         py = depth_map.shape[0]/2
         x = (u*z - px*z) / self.focal_length_pixel_x
         y = (v*z - py*z) / self.focal_length_pixel_x
 
-        return [np.float16(x), np.float16(y), np.float16(z)]
+        return np.array([x, y, z], dtype = np.float16)
 
-    def normalize_depth_map(self, depth_map: np.ndarray, scaling_ratio: float = 1.0, method: str = 'scaling'):
-        """Depth map normalization.
+    def correct_depth_map(self, depth_map: np.ndarray, scaling_ratio: float = 1.0, method: str = 'scaling'):
+        """Depth map correction.
 
         Args:
-            depth_map (np.ndarray): Depth map to normalize.
+            depth_map (np.ndarray): Depth map to correct.
             scaling_ratio (float, optional): Scaling ratio to use. Defaults to 1.0.
-            method (str, optional): Normalization method to use. Can be "normalizing" or "scaling". Defaults to 'scaling'.
+            method (str, optional): Correction method to use. Can be "normalizing" or "scaling". Defaults to 'scaling'.
 
         Raises:
             ValueError: If the method input parameter is not "normalizing" or "scaling".
 
         Returns:
-            depth_map_modified(np.ndarray): Normalized depth map.
+            depth_map_modified(np.ndarray): Corrected depth map.
         """
 
         # Rejection of lower and upper 1%
@@ -796,12 +815,11 @@ class DepthEstimatorDepthAnything:
         input_img = torch.from_numpy(input_img).unsqueeze(0).to(self.device)
         with torch.no_grad():
             disparity = self.model(input_img)
-        disparity_map_array = disparity.cpu().numpy()
-        disparity_map_array = disparity_map_array[0, :, :]
-        disparity_map_array_resized = Image.fromarray(
-            disparity_map_array).resize((1920, 1080))
-        disparity_map_array = np.array(disparity_map_array_resized)
-        depth_map_array = 1/disparity_map_array
+        disparity = torch.nn.functional.interpolate(disparity[None], (input_frame.shape[0], input_frame.shape[1]), mode='bilinear', align_corners=False)[0, 0]
+
+        depth = (disparity - disparity.min()) / (disparity.max() - disparity.min())
+        depth = 1 - depth
+        depth_map_array = depth.cpu().numpy()
 
         return depth_map_array
 
@@ -871,18 +889,23 @@ class LicensePlateDetector:
                         if self.skip_frame:
                             print("Frame skipped because of incorrect depth map")
                             break
-                        depth_map = self.depth_calculator.normalize_depth_map(
+                        depth_map = self.depth_calculator.correct_depth_map(
                             depth_map_out, scaling_ratio, method='normalizing')
 
-                        # fig, ax = plt.subplots(figsize=(10, 8))  # Adjust the values (width, height) for the figure
-                        # ax.set_xticks([])
-                        # ax.set_yticks([])
-                        # ax.set_xticklabels([])
-                        # ax.set_yticklabels([])
-                        # im = plt.imshow(depth_map, cmap='magma')
-                        # cbar = plt.colorbar(im, orientation='horizontal', pad=0.05, shrink=0.7)
-                        # cbar.set_label('Depth [m]', fontsize=28)
-                        # cbar.ax.tick_params(labelsize=28)  # Adjust the labelsize as needed
+                        # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
+                        # for ax in [ax1, ax2]:
+                        #     ax.set_xticks([])
+                        #     ax.set_yticks([])
+                        #     ax.set_xticklabels([])
+                        #     ax.set_yticklabels([])
+                        # im1 = ax1.imshow(depth_map, cmap='magma')
+                        # cbar1 = plt.colorbar(im1, ax=ax1, orientation='horizontal', pad=0.05, shrink=0.7)
+                        # cbar1.set_label('Depth [m]', fontsize=28)
+                        # cbar1.ax.tick_params(labelsize=28)
+                        # im2 = ax2.imshow(depth_map_out, cmap='magma')
+                        # cbar2 = plt.colorbar(im2, ax=ax2, orientation='horizontal', pad=0.05, shrink=0.7)
+                        # cbar2.set_label('Depth [m]', fontsize=28)
+                        # cbar2.ax.tick_params(labelsize=28)
                         # plt.show()
 
                         self.depth_estimation_ran = True
@@ -1056,15 +1079,14 @@ class IOHandler:
         Args:
             vehicle_dictionary (Dict): Vehicle dictinary containing the detected vehicles all information.
         """
-        if self.terminate:
-            df = pd.DataFrame.from_dict(vehicle_dictionary, orient='index')
-            df['predicted_speed'] = df['predicted_speed'].apply(
-                lambda x: "{:.2f}".format(x))
-            df['gt_speed'] = df['gt_speed'].apply(lambda x: "{:.2f}".format(x))
-            df['lp_first_detected_frame'] = df['lp_detected_frames'].apply(
-                lambda x: x[0] if x else None)
-            df.to_excel('speed_estimation_results.xlsx', columns=[
-                        'lane', 'gt_lane', 'predicted_speed', 'gt_speed', 'lp_first_detected_frame', 'gt_iframe', 'was_stationary'])
+        df = pd.DataFrame.from_dict(vehicle_dictionary, orient='index')
+        df['predicted_speed'] = df['predicted_speed'].apply(
+            lambda x: "{:.2f}".format(x))
+        df['gt_speed'] = df['gt_speed'].apply(lambda x: "{:.2f}".format(x))
+        df['lp_first_detected_frame'] = df['lp_detected_frames'].apply(
+            lambda x: x[0] if x else None)
+        df.to_excel('speed_estimation_results.xlsx', columns=[
+                    'lane', 'gt_lane', 'predicted_speed', 'gt_speed', 'lp_first_detected_frame', 'gt_iframe', 'was_stationary'])
 
     def end_stream(self):
         """Ending the video stream."""
@@ -1087,7 +1109,7 @@ def main():
                         "video", "burst_photos"], help="Input mode (video or burst_photos)")
     parser.add_argument("--fps", type=float, default=30,
                         help="Frames per second of the input video")
-    parser.add_argument("--depth_estimator_algorithm", default="adabins", choices=[
+    parser.add_argument("--depth_estimator_algorithm", default="depth_anything", choices=[
                         "zoedepth", "adabins", "depth_anything"], help="Depth estimator algorithm used")
 
     args = parser.parse_args()
