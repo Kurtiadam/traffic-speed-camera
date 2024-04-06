@@ -17,6 +17,7 @@ from OCR.ocr_model_multirow import create_network as create_network_multi
 from collections import Counter
 import pandas as pd
 from PIL import Image
+import OpenEXR
 from typing import Tuple, Dict
 from AdaBins.infer import InferenceHelper
 import xml.etree.ElementTree as ET
@@ -56,8 +57,7 @@ class TrafficSpeedCamera:
             self.depth_estimator = DepthEstimatorDepthAnything(
                 self.depth_calculator, "vits")
         else:
-            raise ValueError("depth_estimator_algorithm can be either 'zoedepth', 'adabins' or 'depth_anything' but got {}".format(
-                depth_estimator_algorithm))
+            self.depth_estimator = DepthGT()
 
         self.license_plate_detector = LicensePlateDetector(
             self.oc_recognizer, self.depth_estimator, self.depth_calculator, self.region_checker)
@@ -824,6 +824,24 @@ class DepthEstimatorDepthAnything:
         return depth_map_array
 
 
+class DepthGT:
+    def __init__(self, folder_path = r"C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run1\EXR") -> None:
+        self.iter = 0
+        self.folder_path = folder_path
+        self.depth_maps = os.listdir(folder_path)
+        self.channels = ['R', 'G', 'B', 'A']
+
+    def create_depth_map(self, input_img):
+        depth_map_path = os.path.join(self.folder_path, self.depth_maps[self.iter])
+        exr = OpenEXR.InputFile(depth_map_path)
+        depth_data = {channel: np.frombuffer(exr.channel(f'FinalImageMovieRenderQueue_WorldDepth.{channel}'), dtype=np.float16) for channel in self.channels}
+        reshaped_depth_data = {name: data.reshape((input_img.shape[0], input_img.shape[1])) for name, data in depth_data.items()}
+        depth_map = reshaped_depth_data['R'] / 100
+        self.iter += 1
+
+        return depth_map
+
+
 class LicensePlateDetector:
     """License plate detection."""
 
@@ -831,7 +849,7 @@ class LicensePlateDetector:
         """
         Args:
             oc_recognizer(OCR): The object that performs license plate OCR.
-            depth_estimator(DepthEstimatorZoe or DepthEstimatorAdabins): depth estimator object.
+            depth_estimator(DepthEstimatorZoe or DepthEstimatorAdabins or DepthEstimatorDepthAnything or DepthGT): depth estimator object.
             depth_calculator(DepthCalculator): depth calculator object.
             region_checker(RegionChecker): region checker object.
         """
@@ -1109,8 +1127,8 @@ def main():
                         "video", "burst_photos"], help="Input mode (video or burst_photos)")
     parser.add_argument("--fps", type=float, default=30,
                         help="Frames per second of the input video")
-    parser.add_argument("--depth_estimator_algorithm", default="depth_anything", choices=[
-                        "zoedepth", "adabins", "depth_anything"], help="Depth estimator algorithm used")
+    parser.add_argument("--depth_estimator_algorithm", default="zoedepth", choices=[
+                        "zoedepth", "adabins", "depth_anything", "gt"], help="Depth estimator algorithm used")
 
     args = parser.parse_args()
 
