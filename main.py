@@ -826,18 +826,15 @@ class DepthEstimatorDepthAnything:
 
 class DepthGT:
     def __init__(self, folder_path = r"C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run1\EXR") -> None:
-        self.iter = 0
         self.folder_path = folder_path
-        self.depth_maps = os.listdir(folder_path)
+        self.depth_maps = sorted(os.listdir(folder_path))
         self.channels = ['R', 'G', 'B', 'A']
 
     def create_depth_map(self, input_img):
-        depth_map_path = os.path.join(self.folder_path, self.depth_maps[self.iter])
-        exr = OpenEXR.InputFile(depth_map_path)
+        exr = OpenEXR.InputFile(os.path.join(self.folder_path, self.depth_maps[iter]))
         depth_data = {channel: np.frombuffer(exr.channel(f'FinalImageMovieRenderQueue_WorldDepth.{channel}'), dtype=np.float16) for channel in self.channels}
         reshaped_depth_data = {name: data.reshape((input_img.shape[0], input_img.shape[1])) for name, data in depth_data.items()}
         depth_map = reshaped_depth_data['R'] / 100
-        self.iter += 1
 
         return depth_map
 
