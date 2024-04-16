@@ -179,15 +179,22 @@ class RegionChecker:
 
         Args:
             point (Tuple): Point to check.
-            polygon (np.array): Polygon to check.
+            polygon (list(np.array) | np.array): Polygon to check.
 
         Returns:
             inside (bool): Whether the point is in the polygon or not.
         """
-        poly_path = mplPath.Path(polygon)
         inside = False
-        if poly_path.contains_point(point):
-            inside = True
+        if isinstance(polygon, np.ndarray):
+            poly_path = mplPath.Path(polygon)
+            if poly_path.contains_point(point):
+                inside = True
+        elif isinstance(polygon, (list)):
+            for poly in polygon:
+                poly_path = mplPath.Path(poly)
+                if poly_path.contains_point(point):
+                    inside = True
+                    break
 
         return inside
 
