@@ -32,7 +32,7 @@ from Depth_Anything.depth_anything.dpt import DepthAnything
 class TrafficSpeedCamera:
     """Class for running the speed camera algorithm"""
 
-    def __init__(self, input_path: str, speed_gts_path: str, speed_benchmark: str, input_mode: str, fps: float = 30, depth_estimator_algorithm: str = "zoe"):
+    def __init__(self, input_path: str, speed_gts_path: str, speed_benchmark: str, input_mode: str, fps: float, depth_estimator_algorithm: str):
         """
         Args:
             input_path (str): Path to the input file or directory.
@@ -79,6 +79,7 @@ class TrafficSpeedCamera:
             show_tracking (bool): Flag indicating whether to display tracking information.
         """
         show_frame = frame.copy()
+        self.measure_fps(show_frame)
         vehicle_detections = self.vehicle_detector.detect_vehicles(show_frame)
         vehicle_dictionary = self.object_tracker.track_objects(
             show_frame, vehicle_detections, show_tracking)
@@ -96,7 +97,6 @@ class TrafficSpeedCamera:
             #         print(subkey, subvalue)
             # print("----------------------------------------------------------------------")
 
-        self.measure_fps(show_frame)
         cv2.imshow("Frame", show_frame)
 
         return vehicle_dictionary
@@ -148,12 +148,12 @@ class TrafficSpeedCamera:
         curr_time = time.time()
         frame_time = curr_time-self.last_frame_time
         fps = int(1/frame_time)
-        # cv2.putText(frame, str(fps), [
-        #             frame.shape[1]-100, frame.shape[0]-50], cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        cv2.putText(frame, str(fps), [
+                    frame.shape[1]-100, frame.shape[0]-50], cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
         self.last_frame_time = time.time()
 
-        # cv2.putText(frame, str(self.iter), [
-        #             50, frame.shape[0]-50], cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+        cv2.putText(frame, str(self.iter), [
+                    50, frame.shape[0]-50], cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
 
 
 class RegionChecker:
@@ -168,13 +168,28 @@ class RegionChecker:
             self.invalid_detection_area = np.array([
                 [0, 180], [1450, 170], [1920, 775], [1920, 0], [0, 0]])
         elif speed_benchmark == "ue5":
-            self.speed_measurement_area = np.array([[0, 200], [1920, 200], [1920, 770], [0, 770]])
-            self.lane_1_area = np.array([[650, 0], [850, 0], [520, 1080], [0, 1080], [0, 750]])
-            self.lane_2_area = np.array([[850, 0], [1060, 0], [1310, 1080], [500, 1080]])
-            self.lane_3_area = np.array([[1060, 0], [1270, 0], [1920, 780], [1920, 1080], [1310, 1080]])
-            self.invalid_detection_area = np.array([[1270, 0], [1920, 0], [1920, 780]])
+            # run1
+            # self.speed_measurement_area = np.array([[0, 300], [1920, 300], [1920, 600], [0, 600]])
+            # self.lane_1_area = np.array([[650, 0], [850, 0], [520, 1080], [0, 1080], [0, 750]])
+            # self.lane_2_area = np.array([[850, 0], [1060, 0], [1310, 1080], [500, 1080]])
+            # self.lane_3_area = np.array([[1060, 0], [1270, 0], [1920, 780], [1920, 1080], [1310, 1080]])
+            # self.invalid_detection_area = np.array([[1270, 0], [1920, 0], [1920, 780]])
 
-    def is_point_in_polygon(self, point: Tuple, polygon: np.array):
+            # run2
+            self.speed_measurement_area = np.array([[0, 160], [1440, 160], [1440, 750], [0, 750]])
+            self.lane_1_area = np.array([[412, 0], [608, 0], [332, 1080], [0, 1080], [0, 570]])
+            self.lane_2_area = np.array([[608, 0], [808, 0], [1028, 1080], [332, 1080]])
+            self.lane_3_area = np.array([[808, 0], [1013, 0], [1440, 615], [1440, 1080], [1028, 1080]])
+            self.invalid_detection_area = np.array([[1013, 0], [1440, 0], [1440, 615]])
+
+            # run3
+            # self.speed_measurement_area = np.array([[0, 220], [1920, 220], [1920, 670], [0, 670]])
+            # self.lane_1_area = np.array([[642, 0], [850, 0], [520, 1080], [0, 1080], [0, 730]])
+            # self.lane_2_area = np.array([[850, 0], [1070, 0], [1350, 1080], [520, 1080]])
+            # self.lane_3_area = np.array([[1070, 0], [1285, 0], [1920, 725], [1920, 1080], [1350, 1080]])
+            # self.invalid_detection_area = [np.array([[1285, 0], [1920, 0], [1920, 725]]), np.array([[0,0], [642, 0], [0, 730]])]
+
+    def is_point_in_polygon(self, point: Tuple, polygon):
         """Checks if a point is in a given polygon.
 
         Args:
@@ -313,16 +328,18 @@ class VehicleDetector:
         for result in vd_results:
             boxes = result.boxes
             for box in boxes:
-                x1_vd, y1_vd, x2_vd, y2_vd = tuple(map(int, box.xyxy[0]))
-                x1_vd = int(min(x1_vd - frame.shape[1]/100, frame.shape[1]))
-                y1_vd = int(min(y1_vd - frame.shape[0]/100, frame.shape[0]))
-                x2_vd = int(min(x2_vd + frame.shape[1]/100, frame.shape[1]))
-                y2_vd = int(min(y2_vd + frame.shape[0]/100, frame.shape[0]))
+                x1_vd, y1_vd, x2_vd, y2_vd = np.array(box.xyxy[0].cpu())
+                x1_vd = np.clip(x1_vd - frame.shape[1]/100, 0, frame.shape[1]).astype(np.int16)
+                y1_vd = np.clip(y1_vd - frame.shape[0]/50, 0, frame.shape[0]).astype(np.int16)
+                x2_vd = np.clip(x2_vd + frame.shape[1]/100, 0, frame.shape[1]).astype(np.int16)
+                y2_vd = np.clip(y2_vd + frame.shape[0]/50, 0, frame.shape[0]).astype(np.int16)
                 mid_vd = ((x2_vd + x1_vd) / 2, (y2_vd + y1_vd) / 2)
 
                 in_invalid_area = self.region_checker.is_point_in_polygon(
                     mid_vd, self.region_checker.invalid_detection_area)
                 if not in_invalid_area:
+                    # test = frame[y1_vd:y2_vd, x1_vd:x2_vd]
+                    # cv2.imshow("test", test)
                     cv2.rectangle(frame, (x1_vd, y1_vd),
                                   (x2_vd, y2_vd), (0, 165, 255), 2)
                     conf = math.ceil((box.conf[0]*100))/100
@@ -374,10 +391,7 @@ class ObjectTracker:
 
         for result in track_results:
             idx = int(result[-1])
-            bboxes = result[:-1]
-            bboxes_int = tuple(map(int, bboxes))
-            # Prevent any minus values
-            bboxes_int = np.clip(bboxes_int, a_min=0, a_max=None)
+            bboxes = np.clip(result[:-1], 0, None).astype(np.int16)
             center = (int((result[2]+result[0])/2),
                       int((result[3]+result[1])/2))
 
@@ -389,6 +403,7 @@ class ObjectTracker:
                 self.vehicle_dictionary[idx]['lp_center'] = []
                 self.vehicle_dictionary[idx]['lp_center_reconstructed'] = []
                 self.vehicle_dictionary[idx]['lp_detected_frames'] = []
+                self.vehicle_dictionary[idx]['lp_detected_frames_speed_meas'] = []
                 self.vehicle_dictionary[idx]['gt_iframe'] = 0
                 self.vehicle_dictionary[idx]['lp_conf'] = 0
                 self.vehicle_dictionary[idx]['lp_type'] = ""
@@ -408,7 +423,7 @@ class ObjectTracker:
                 self.vehicle_dictionary[idx]['predicted_speed'] = 0
                 self.vehicle_dictionary[idx]['gt_speed'] = 0
 
-            self.vehicle_dictionary[idx]['vd_bbox_coords'] = bboxes_int
+            self.vehicle_dictionary[idx]['vd_bbox_coords'] = bboxes
             self.vehicle_dictionary[idx]['vd_tracked'] = True
 
             # Check which lane the vehicle is in
@@ -450,25 +465,19 @@ class ObjectTracker:
             if show:
                 self.vehicle_dictionary[idx]['vd_center'].append(center)
                 if idx % 2 == 0:
-                    R = 255
-                    B = 0
-                    G = 0
+                    line_color = (0, 255, 0)
                 else:
-                    R = 0
-                    B = 0
-                    G = 255
+                    line_color = (0, 0, 255)
                 for i in range(len(self.vehicle_dictionary[idx]['vd_center']) - 1):
                     center_x = self.vehicle_dictionary[idx]['vd_center'][i]
-                    center_x = tuple(map(int, center_x))
                     center_y = self.vehicle_dictionary[idx]['vd_center'][i + 1]
-                    center_y = tuple(map(int, center_y))
-                    cv2.line(frame, center_y, center_x, (B, G, R), thickness=2)
+                    cv2.line(frame, center_y, center_x, line_color, thickness=2)
                 cv2.putText(frame, f'{str(idx)}', [
-                            bboxes_int[2], bboxes_int[1]], cv2.FONT_HERSHEY_SIMPLEX, 1, (B, G, R), 2)
+                            bboxes[2], bboxes[1]], cv2.FONT_HERSHEY_SIMPLEX, 1, line_color, 2)
             else:
                 self.vehicle_dictionary[idx]['vd_center'] = center
                 cv2.putText(frame, f'{str(idx)}', [
-                            bboxes_int[2], bboxes_int[1]], cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
+                            bboxes[2], bboxes[1]], cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
 
         return self.vehicle_dictionary
 
@@ -538,35 +547,63 @@ class DepthCalculator:
             self.sensor_width = 3.68
             self.focal_length_pixel_x = ((self.focal_length_mm/self.sensor_width)
                                         * self.img_width_pixel) / self.resolution_ratio_w  # 928.44
-
-            # self.sensor_height = 2.76
-            # self.img_height_pixel = 1080
-            # self.focal_length_pixel_y = (self.focal_length_mm/self.sensor_height) * self.img_height_pixel
+            self.focal_length_pixel_y = self.focal_length_pixel_x
 
             self.min_distance = 4
             self.max_distance = 13.5
 
-            # self.ref_point_1 = np.array([1108, 248])
-            # self.ref_point_2 = np.array([1400, 251])
             self.ref_point_1 = np.array([649, 262])
             self.ref_point_2 = np.array([647, 43])
             self.ref_distance_irl = 4.8
         
         if speed_benchmark == "ue5":
-            self.focal_length_mm = 30
-            self.sensor_width = 36
-            self.img_width_pixel = 1920
+            # run1
+            # self.focal_length_mm = 30
+            # self.sensor_width = 36
+            # self.img_width_pixel = 1920
+            # self.focal_length_pixel_x = (self.focal_length_mm/self.sensor_width) * self.img_width_pixel 
+            
+            # self.sensor_height = 20.25
+            # self.img_height_pixel = 1080
+            # self.focal_length_pixel_y = (self.focal_length_mm/self.sensor_height) * self.img_height_pixel
+
+            # self.min_distance = 5.7
+            # self.max_distance = 30
+            # self.ref_point_1 = np.array([1620, 151])
+            # self.ref_point_2 = np.array([1820, 311])
+            # self.ref_distance_irl = 4.4
+
+            # # run2
+            self.focal_length_mm = 25
+            self.sensor_width = 32
+            self.img_width_pixel = 1440
             self.focal_length_pixel_x = (self.focal_length_mm/self.sensor_width) * self.img_width_pixel 
             
-            self.sensor_height = 20.25
+            self.sensor_height = 24
             self.img_height_pixel = 1080
             self.focal_length_pixel_y = (self.focal_length_mm/self.sensor_height) * self.img_height_pixel
 
-            self.min_distance = 5.7
-            self.max_distance = 30
-            self.ref_point_1 = np.array([1620, 151])
-            self.ref_point_2 = np.array([1820, 311])
-            self.ref_distance_irl = 4.4
+            self.min_distance = 6.4
+            self.max_distance = 22.7
+            self.ref_point_1 = np.array([1338, 200])
+            self.ref_point_2 = np.array([1217, 75])
+            self.ref_distance_irl = 3.26
+
+            # run3
+            # self.focal_length_mm = 20
+            # self.sensor_width = 32
+            # self.img_width_pixel = 1920
+            # self.focal_length_pixel_x = (self.focal_length_mm/self.sensor_width) * self.img_width_pixel 
+            
+            # self.sensor_height = 18
+            # self.img_height_pixel = 1080
+            # self.focal_length_pixel_y = (self.focal_length_mm/self.sensor_height) * self.img_height_pixel
+
+            # self.min_distance = 5.7
+            # self.max_distance = 23
+            # self.ref_point_1 = np.array([1775, 285])
+            # self.ref_point_2 = np.array([1589, 143])
+            # self.ref_distance_irl = 3.23
 
         self.scaling_ratios = np.array([], dtype=np.float16)
         self.avg_running_scaling_ratio = 0
@@ -608,7 +645,7 @@ class DepthCalculator:
         px = depth_map.shape[1]/2
         py = depth_map.shape[0]/2
         x = (u*z - px*z) / self.focal_length_pixel_x
-        y = (v*z - py*z) / self.focal_length_pixel_x
+        y = (v*z - py*z) / self.focal_length_pixel_y
 
         return np.array([x, y, z], dtype = np.float16)
 
@@ -626,7 +663,6 @@ class DepthCalculator:
         Returns:
             depth_map_modified(np.ndarray): Corrected depth map.
         """
-
         # Rejection of lower and upper 1%
         lower_threshold = np.percentile(depth_map, 1)
         upper_threshold = np.percentile(depth_map, 99)
@@ -677,7 +713,7 @@ class DepthCalculator:
         v_1 = self.ref_point_1[1]
         z_1 = np.average(depth_map[v_1-5:v_1+5, u_1-5:u_1+5])
         x_1 = (u_1*z_1 - px*z_1) / self.focal_length_pixel_x
-        y_1 = (v_1*z_1 - py*z_1) / self.focal_length_pixel_x
+        y_1 = (v_1*z_1 - py*z_1) / self.focal_length_pixel_y
         ref_point_reconstructed_1 = np.array(
             [np.float16(x_1), np.float16(y_1), np.float16(z_1)])
 
@@ -685,14 +721,15 @@ class DepthCalculator:
         v_2 = self.ref_point_2[1]
         z_2 = np.average(depth_map[v_2-5:v_2+5, u_2-5:u_2+5])
         x_2 = (u_2*z_2 - px*z_2) / self.focal_length_pixel_x
-        y_2 = (v_2*z_2 - py*z_2) / self.focal_length_pixel_x
+        y_2 = (v_2*z_2 - py*z_2) / self.focal_length_pixel_y
         ref_point_reconstructed_2 = np.array(
             [np.float16(x_2), np.float16(y_2), np.float16(z_2)])
 
-        ref_point_reconstructed_distance = np.float16(
-            np.sqrt(np.sum((ref_point_reconstructed_1-ref_point_reconstructed_2)**2)))
+        # ref_point_reconstructed_distance = np.float16(
+        #     np.sqrt(np.sum((ref_point_reconstructed_1-ref_point_reconstructed_2)**2)))
+        ref_point_reconstructed_distance = np.float16(np.sqrt(np.sum((z_1-z_2)**2)))
         scaling_ratio = np.float16(
-            self.ref_distance_irl/ref_point_reconstructed_distance)
+            self.ref_distance_irl/(ref_point_reconstructed_distance + 1e-16))
 
         self.scaling_ratios = np.append(self.scaling_ratios, scaling_ratio)
         if self.scaling_ratios.size % 40 == 0:
@@ -736,7 +773,7 @@ class DepthEstimatorZoeDepth:
         self.zoe = model_zoe.to(DEVICE)
         self.depth_calculator = depth_calculator
 
-    def create_depth_map(self, input_frame: np.ndarray):
+    def create_depth_map(self, input_frame: np.ndarray, **kwargs):
         """Estimate a depth map using ZoeDepth.
 
         Args:
@@ -765,7 +802,7 @@ class DepthEstimatorAdabins:
         self.infer_helper = InferenceHelper(dataset='nyu')
         self.depth_calculator = depth_calculator
 
-    def create_depth_map(self, input_frame: np.ndarray):
+    def create_depth_map(self, input_frame: np.ndarray, **kwargs):
         """Estimate a depth map using AdaBins.
 
         Args:
@@ -813,7 +850,7 @@ class DepthEstimatorDepthAnything:
             PrepareForNet(),])
         os.chdir(os.path.join(os.getcwd(), ".."))
 
-    def create_depth_map(self, input_frame: np.ndarray):
+    def create_depth_map(self, input_frame: np.ndarray, **kwargs):
         """Estimate a depth map using AdaBins.
 
         Args:
@@ -837,15 +874,14 @@ class DepthEstimatorDepthAnything:
 
 
 class DepthGT:
-    def __init__(self, folder_path = r"C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run1\EXR") -> None:
+    def __init__(self, folder_path: str = r"C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run2\EXR") -> None:
         self.folder_path = folder_path
         self.depth_maps = sorted(os.listdir(folder_path))
-        self.channels = ['R', 'G', 'B', 'A']
 
-    def create_depth_map(self, input_img):
-        exr = OpenEXR.InputFile(os.path.join(self.folder_path, self.depth_maps[iter]))
-        depth_data = {channel: np.frombuffer(exr.channel(f'FinalImageMovieRenderQueue_WorldDepth.{channel}'), dtype=np.float16) for channel in self.channels}
-        reshaped_depth_data = {name: data.reshape((input_img.shape[0], input_img.shape[1])) for name, data in depth_data.items()}
+    def create_depth_map(self, input_img: np.ndarray, map_index: int) -> np.ndarray:
+        exr = OpenEXR.InputFile(os.path.join(self.folder_path, self.depth_maps[map_index]))
+        depth_data = {'R': np.frombuffer(exr.channel('FinalImageMovieRenderQueue_WorldDepth.R'), dtype=np.float16)}
+        reshaped_depth_data = {'R': depth_data['R'].reshape((input_img.shape[0], input_img.shape[1]))}
         depth_map = reshaped_depth_data['R'] / 100
 
         return depth_map
@@ -888,7 +924,6 @@ class LicensePlateDetector:
             bbox_vd = vehicle_dictionary[idx]['vd_bbox_coords']
             cropped_vehicle = np.array(
                 frame[bbox_vd[1]:bbox_vd[3], bbox_vd[0]:bbox_vd[2]])
-
             if vehicle_dictionary[idx]['vd_tracked']:
                 # cv2.imshow(str(idx), cropped_vehicle)
                 cv2.putText(show_frame, vehicle_dictionary[idx]['lp_text'], [
@@ -900,24 +935,25 @@ class LicensePlateDetector:
                     cv2.destroyWindow(str(idx) + " license plate")
                 vehicle_dictionary[idx]['tracking_window_opened'] = False
 
-            if self.skip_frame:
-                break
-
             if vehicle_dictionary[idx]['vd_tracked'] and not vehicle_dictionary[idx]['stationary']:
                 lp_preds = self.model_lp(
                     cropped_vehicle, imgsz=640, iou=0.5, verbose=False)
                 for result in lp_preds:  # Get predictions
                     if len(result) > 0 and not self.depth_estimation_ran:
                         depth_map_out = self.depth_estimator.create_depth_map(
-                            frame)
+                            frame, map_index=iter-1)
 
                         scaling_ratio, self.skip_frame = self.depth_calculator.get_scaling_ratio(
                             depth_map_out)
                         if self.skip_frame:
                             print("Frame skipped because of incorrect depth map")
                             break
-                        depth_map = self.depth_calculator.correct_depth_map(
-                            depth_map_out, scaling_ratio, method='normalizing')
+                        # depth_map = self.depth_calculator.correct_depth_map(
+                        #     depth_map_out, scaling_ratio, method='normalizing')
+                        depth_map = depth_map_out
+
+                        # im = plt.imshow(depth_map, cmap= 'magma')
+                        # cbar = plt.colorbar(im, orientation='horizontal', pad=0.05, shrink=0.7)
 
                         # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
                         # for ax in [ax1, ax2]:
@@ -958,7 +994,8 @@ class LicensePlateDetector:
                             vehicle_dictionary[idx]['lp_conf'] = conf
                             vehicle_dictionary[idx]['lp_center'].append(
                                 lp_center)
-
+                            cv2.rectangle(show_frame, (bbox_vd[0] + x1_lp, bbox_vd[1] + y1_lp), (bbox_vd[0] + x2_lp, bbox_vd[1] + y2_lp), (0, 165, 255), 2)
+                            # cv2.imshow(f"LP {idx}", cropped_lp)
                             lp_text = self.oc_recognizer.read_license_plate(
                                 cropped_lp, vehicle_dictionary[idx]['lp_type'])
                             vehicle_dictionary[idx]['lp_texts'].append(lp_text)
@@ -982,6 +1019,8 @@ class LicensePlateDetector:
 
                             is_point_in_meas_area = self.region_checker.is_point_in_polygon(
                                 (lp_center[0], lp_center[1]), self.region_checker.speed_measurement_area)
+                            if is_point_in_meas_area:
+                                vehicle_dictionary[idx]['lp_detected_frames_speed_meas'].append(iter)
                             vehicle_dictionary[idx]['in_measurement_area'] = is_point_in_meas_area
                             if is_point_in_meas_area and vehicle_dictionary[idx]['lp_tracked']:
                                 world_coordinates = self.depth_calculator.get_3D_coordinates(
@@ -1027,12 +1066,8 @@ class SpeedEstimator:
         """
         for idx in vehicle_dictionary.keys():
             if vehicle_dictionary[idx]['lp_tracked'] and len(vehicle_dictionary[idx]['lp_center_reconstructed']) >= 2 and vehicle_dictionary[idx]['in_measurement_area']:
-                src = np.array([vehicle_dictionary[idx]['lp_center_reconstructed'][-2][0],
-                                vehicle_dictionary[idx]['lp_center_reconstructed'][-2][1],
-                                vehicle_dictionary[idx]['lp_center_reconstructed'][-2][2]])
-                dst = np.array([vehicle_dictionary[idx]['lp_center_reconstructed'][-1][0],
-                                vehicle_dictionary[idx]['lp_center_reconstructed'][-1][1],
-                                vehicle_dictionary[idx]['lp_center_reconstructed'][-1][2]])
+                src = vehicle_dictionary[idx]['lp_center_reconstructed'][-2]
+                dst = vehicle_dictionary[idx]['lp_center_reconstructed'][-1]
                 travelled_distance = np.float16(np.sqrt(np.sum((dst-src)**2)))
                 vehicle_dictionary[idx]['travelled_distance'].append(
                     travelled_distance)
@@ -1093,9 +1128,9 @@ class IOHandler:
         Args:
             ret (bool): Flag indicating if the video capture was successful.
         """
-        if cv2.waitKey(10) & 0xFF == ord('p'):
+        if cv2.waitKey(1) & 0xFF == ord('p'):
             cv2.waitKey(0)
-        if cv2.waitKey(10) & 0xFF == ord('q') or not ret:
+        if cv2.waitKey(1) & 0xFF == ord('q') or not ret:
             self.terminate = True
 
         return self.terminate
@@ -1127,8 +1162,8 @@ def main():
     parser = argparse.ArgumentParser(description="Traffic Speed Camera Script")
 
     parser.add_argument(
-        "--input_path", default=r"C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run1\JPEG", help="Path to the input media")
-    parser.add_argument("--speeds_gt_file_path", default=r"labels.txt",
+        "--input_path", default=r"C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run2\JPEG", help="Path to the input media")
+    parser.add_argument("--speeds_gt_file_path", default=r"C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run2\labels.txt",
                         help="Path to the speed measurement benchmark file (should be .txt or .xml file)")
     parser.add_argument("--speed_benchmark", default="ue5", choices=[
                         "ue5", "brazilian_road"], help="Which speed measurement benchmark should be used")
@@ -1136,7 +1171,7 @@ def main():
                         "video", "burst_photos"], help="Input mode (video or burst_photos)")
     parser.add_argument("--fps", type=float, default=30,
                         help="Frames per second of the input video")
-    parser.add_argument("--depth_estimator_algorithm", default="zoedepth", choices=[
+    parser.add_argument("--depth_estimator_algorithm", default="gt", choices=[
                         "zoedepth", "adabins", "depth_anything", "gt"], help="Depth estimator algorithm used")
 
     args = parser.parse_args()
