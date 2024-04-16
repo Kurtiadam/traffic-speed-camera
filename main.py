@@ -1,27 +1,29 @@
+from torchvision.transforms import Compose
+from torchvision import transforms
+import xml.etree.ElementTree as ET
+import matplotlib.path as mplPath
+from collections import Counter
+from typing import Tuple, Dict
 from ultralytics import YOLO
-import cv2
-import argparse
+from PIL import Image
+import pandas as pd
+from sort import *
 import numpy as np
+import argparse
+import OpenEXR
+import torch
 import math
 import time
-import re
-from sort import *
-import os
+import yaml
+import cv2
 import sys
-import torch
-from torchvision import transforms
-from torchvision.transforms import Compose
+import re
+import os
+
 from OCR.config_utils import load_config
 from OCR.ocr_model import create_network
 from OCR.ocr_model_multirow import create_network as create_network_multi
-from collections import Counter
-import pandas as pd
-from PIL import Image
-import OpenEXR
-from typing import Tuple, Dict
 from AdaBins.infer import InferenceHelper
-import xml.etree.ElementTree as ET
-import matplotlib.path as mplPath
 depth_anything_dir = os.path.abspath(os.path.join(
     os.path.dirname(__file__), "Depth_Anything"))
 sys.path.append(depth_anything_dir)
@@ -32,46 +34,44 @@ from Depth_Anything.depth_anything.dpt import DepthAnything
 class TrafficSpeedCamera:
     """Class for running the speed camera algorithm"""
 
-    def __init__(self, input_path: str, speed_gts_path: str, speed_benchmark: str, input_mode: str, fps: float, depth_estimator_algorithm: str):
+    def __init__(self, config_path: str):
         """
         Args:
-            input_path (str): Path to the input file or directory.
-            speed_gts_path (str): Path to the XML/TXT ground truth file used to benchmark the speed estimation algorithm.
-            speed_benchmark (str): Speed measurement benchmark to use, either "ue5" or "brazilian_road".
-            input_mode (str): Input mode, either "burst_photos" or "video".
-            fps (int, optional): Frames per second of the source. Defaults to 30.
-            depth_estimator_algorithm (str, optional): The monocular depth estimation algorithm to use. "zoe" or "adabins". Defaults to "zoe".
+            config_path (str): Path to the YAML config file.
         """
-        self.region_checker = RegionChecker(speed_benchmark)
-        self.depth_calculator = DepthCalculator(speed_benchmark)
-        self.io_handler = IOHandler(input_path)
-        self.vehicle_detector = VehicleDetector(self.region_checker)
+        # Open the file and load the file
+        with open(config_path, 'r') as f:
+            self.config = yaml.safe_load(f)
+        self.region_checker = RegionChecker(self.config)
+        self.depth_calculator = DepthCalculator(self.config)
+        self.io_handler = IOHandler(self.config['input_media']['media_path'])
+        self.vehicle_detector = VehicleDetector(self.region_checker, self.config)
         self.oc_recognizer = OCR()
 
-        if depth_estimator_algorithm == "zoedepth":
+        if self.config['depth_estimation']['model'] == "zoedepth":
             self.depth_estimator = DepthEstimatorZoeDepth(
-                self.depth_calculator)
-        elif depth_estimator_algorithm == "adabins":
-            self.depth_estimator = DepthEstimatorAdabins(self.depth_calculator)
-        elif depth_estimator_algorithm == "depth_anything":
+                self.depth_calculator, self.config)
+        elif self.config['depth_estimation']['model'] == "adabins":
+            self.depth_estimator = DepthEstimatorAdabins(self.depth_calculator, self.config)
+        elif self.config['depth_estimation']['model'] == "depth_anything":
             self.depth_estimator = DepthEstimatorDepthAnything(
-                self.depth_calculator, "vits")
+                self.depth_calculator, self.config)
         else:
-            self.depth_estimator = DepthGT()
+            self.depth_estimator = DepthGT(self.config['input_media']['depth_labels_path'])
 
         self.license_plate_detector = LicensePlateDetector(
-            self.oc_recognizer, self.depth_estimator, self.depth_calculator, self.region_checker)
-        self.gt_speed_handler = GTHandler(speed_gts_path)
+            self.oc_recognizer, self.depth_estimator, self.depth_calculator, self.region_checker, self.config)
+        self.gt_speed_handler = GTHandler(self.config['input_media']['speed_labels_path'])
         self.object_tracker = ObjectTracker(
-            self.region_checker, self.gt_speed_handler)
-        self.speed_estimator = SpeedEstimator(fps)
+            self.region_checker, self.gt_speed_handler, self.config)
+        self.speed_estimator = SpeedEstimator(self.config['input_media']['fps'])
         self.fps_count = 0
-        self.input_mode = input_mode
-        self.input_path = input_path
+        self.input_mode = self.config['input_media']['input_type']
+        self.input_path = self.config['input_media']['media_path']
         self.last_frame_time = time.time()
         self.iter = 0
 
-    def process_frame(self, frame: np.ndarray, show_tracking: bool) -> None:
+    def process_frame(self, frame: np.ndarray) -> None:
         """Process a single frame.
 
         Args:
@@ -82,7 +82,7 @@ class TrafficSpeedCamera:
         self.measure_fps(show_frame)
         vehicle_detections = self.vehicle_detector.detect_vehicles(show_frame)
         vehicle_dictionary = self.object_tracker.track_objects(
-            show_frame, vehicle_detections, show_tracking)
+            show_frame, vehicle_detections)
         if len(vehicle_detections) != 0:
             vehicle_dictionary_lp, skip_speed_measurement = self.license_plate_detector.detect_license_plates(
                 frame, show_frame, vehicle_dictionary, self.iter)
@@ -101,7 +101,7 @@ class TrafficSpeedCamera:
 
         return vehicle_dictionary
 
-    def run(self, show_tracking: bool, ret: bool = True) -> None:
+    def run(self, ret: bool = True) -> None:
         """Run the speed camera algorithm.
 
         Args:
@@ -115,7 +115,7 @@ class TrafficSpeedCamera:
                 self.iter += 1
                 image_path = os.path.join(self.input_path, file_name)
                 frame = cv2.imread(image_path)
-                vehicle_dictionary = self.process_frame(frame, show_tracking)
+                vehicle_dictionary = self.process_frame(frame)
                 self.io_handler.check_stream(ret)
                 if self.io_handler.terminate:
                     self.io_handler.write_results(vehicle_dictionary)
@@ -133,7 +133,7 @@ class TrafficSpeedCamera:
                     self.io_handler.end_stream()
                 self.iter += 1
                 # print(self.iter)
-                vehicle_dictionary = self.process_frame(frame, show_tracking)
+                vehicle_dictionary = self.process_frame(frame)
 
         else:
             raise ValueError(
@@ -159,28 +159,27 @@ class TrafficSpeedCamera:
 class RegionChecker:
     """Class for checking region of interests on the frame."""
 
-    def __init__(self, speed_benchmark:str) -> None:
-        if speed_benchmark == "brazilian_road":
+    def __init__(self, config) -> None:
+        if config['input_media']['benchmark_type'] == "brazilian_road":
             self.speed_measurement_area = np.array([[0, 460], [1920, 370], [1920, 650], [0, 800]])
             self.lane_1_area = np.array([[222, 9], [599, 8], [519, 1071], [0, 1072]])
             self.lane_2_area = np.array([[599, 9], [962, 8], [1349, 1067], [519, 1071]])
             self.lane_3_area = np.array([[962, 8], [1307, 12], [1920, 1075], [1349, 1067]])
             self.invalid_detection_area = np.array([
                 [0, 180], [1450, 170], [1920, 775], [1920, 0], [0, 0]])
-        elif speed_benchmark == "ue5":
-            # run1
-            # self.speed_measurement_area = np.array([[0, 300], [1920, 300], [1920, 600], [0, 600]])
-            # self.lane_1_area = np.array([[650, 0], [850, 0], [520, 1080], [0, 1080], [0, 750]])
-            # self.lane_2_area = np.array([[850, 0], [1060, 0], [1310, 1080], [500, 1080]])
-            # self.lane_3_area = np.array([[1060, 0], [1270, 0], [1920, 780], [1920, 1080], [1310, 1080]])
-            # self.invalid_detection_area = np.array([[1270, 0], [1920, 0], [1920, 780]])
+        elif config['input_media']['benchmark_type'] == "ue5":
+            self.speed_measurement_area = np.array(config['depth_estimation']['regions']['speed_measurement_area'])
+            self.lane_1_area = np.array(config['depth_estimation']['regions']['lane_1_area'])
+            self.lane_2_area = np.array(config['depth_estimation']['regions']['lane_2_area'])
+            self.lane_3_area = np.array(config['depth_estimation']['regions']['lane_3_area'])
+            self.invalid_detection_area = np.array(config['depth_estimation']['regions']['invalid_detection_area'])
 
             # run2
-            self.speed_measurement_area = np.array([[0, 160], [1440, 160], [1440, 750], [0, 750]])
-            self.lane_1_area = np.array([[412, 0], [608, 0], [332, 1080], [0, 1080], [0, 570]])
-            self.lane_2_area = np.array([[608, 0], [808, 0], [1028, 1080], [332, 1080]])
-            self.lane_3_area = np.array([[808, 0], [1013, 0], [1440, 615], [1440, 1080], [1028, 1080]])
-            self.invalid_detection_area = np.array([[1013, 0], [1440, 0], [1440, 615]])
+            # self.speed_measurement_area = np.array([[0, 160], [1440, 160], [1440, 750], [0, 750]])
+            # self.lane_1_area = np.array([[412, 0], [608, 0], [332, 1080], [0, 1080], [0, 570]])
+            # self.lane_2_area = np.array([[608, 0], [808, 0], [1028, 1080], [332, 1080]])
+            # self.lane_3_area = np.array([[808, 0], [1013, 0], [1440, 615], [1440, 1080], [1028, 1080]])
+            # self.invalid_detection_area = np.array([[1013, 0], [1440, 0], [1440, 615]])
 
             # run3
             # self.speed_measurement_area = np.array([[0, 220], [1920, 220], [1920, 670], [0, 670]])
@@ -300,15 +299,16 @@ class GTHandler:
 class VehicleDetector:
     """Vehicle detection class."""
 
-    def __init__(self, region_checker: RegionChecker):
+    def __init__(self, region_checker: RegionChecker, config):
         """
 
         Args:
             region_checker (RegionChecker): region checker object
         """
-        self.model_vd = YOLO('./models/yolov8m.pt')
-        # ["bicycle", "car", "motorcycle", "bus", "truck"]
-        self.searched_class_indices = [1, 2, 3, 5, 7]
+        self.model_vd = YOLO(config['vehicle_detection']['model_path'])
+        self.searched_class_indices = config['vehicle_detection']['searched_classes']
+        self.min_conf = config['vehicle_detection']['min_conf']
+        self.nms_iou = config['vehicle_detection']['nms_iou']
         self.region_checker = region_checker
 
     def detect_vehicles(self, frame: np.ndarray) -> np.ndarray:
@@ -323,7 +323,8 @@ class VehicleDetector:
         detections = np.empty((0, 5))
         st_time = time.time()
         vd_results = self.model_vd(
-            frame, stream=True, classes=self.searched_class_indices, conf=0.4, iou=0.3, agnostic_nms=True, verbose=False)
+            frame, stream=True, classes=self.searched_class_indices, 
+            conf=self.min_conf, iou=self.nms_iou, agnostic_nms=True, verbose=False)
 
         for result in vd_results:
             boxes = result.boxes
@@ -360,19 +361,22 @@ class VehicleDetector:
 class ObjectTracker:
     """Class for object tracking"""
 
-    def __init__(self, region_checker: RegionChecker, gt_speed_handler: GTHandler):
+    def __init__(self, region_checker: RegionChecker, gt_speed_handler: GTHandler, config):
         """
 
         Args:
             region_checker (RegionChecker): region checker object
             gt_speed_handler (GTHandler): ground truth speed handler object
         """
-        self.tracker = Sort(max_age=2, min_hits=5, iou_threshold=0.3)
+        self.tracker = Sort(max_age=config['tracking']['sort']['max_age'],
+                             min_hits=config['tracking']['sort']['min_hits'],
+                              iou_threshold=config['tracking']['sort']['iou_threshold'])
+        self.show_tracking = config['tracking']['sort']['show_tracking']
         self.vehicle_dictionary = {}
         self.region_checker = region_checker
         self.gt_speed_handler = gt_speed_handler
 
-    def track_objects(self, frame: np.ndarray, detections: np.ndarray, show: bool) -> Dict[int, Dict]:
+    def track_objects(self, frame: np.ndarray, detections: np.ndarray) -> Dict[int, Dict]:
         """Track objects in a frame.
 
         Args:
@@ -462,7 +466,7 @@ class ObjectTracker:
                     self.vehicle_dictionary[idx]['stationary'] = True
                     self.vehicle_dictionary[idx]['was_stationary'] = True
 
-            if show:
+            if self.show_tracking:
                 self.vehicle_dictionary[idx]['vd_center'].append(center)
                 if idx % 2 == 0:
                     line_color = (0, 255, 0)
@@ -538,8 +542,8 @@ class OCR:
 class DepthCalculator:
     """Depth calculator in the image."""
 
-    def __init__(self, speed_benchmark: str):
-        if speed_benchmark == "brazilian_road":
+    def __init__(self, config):
+        if config['input_media']['benchmark_type'] == "brazilian_road":
             self.real_sensor_resolution_w = 3280
             self.img_width_pixel = 1920
             self.resolution_ratio_w = self.real_sensor_resolution_w / self.img_width_pixel
@@ -556,38 +560,37 @@ class DepthCalculator:
             self.ref_point_2 = np.array([647, 43])
             self.ref_distance_irl = 4.8
         
-        if speed_benchmark == "ue5":
-            # run1
-            # self.focal_length_mm = 30
-            # self.sensor_width = 36
-            # self.img_width_pixel = 1920
+        if config['input_media']['benchmark_type'] == "ue5":
+            self.focal_length_mm = config['depth_estimation']['camera_parameters']['focal_length_mm']
+            self.sensor_width = config['depth_estimation']['camera_parameters']['sensor_width']
+            self.img_width_pixel = config['depth_estimation']['camera_parameters']['img_width_pixel']
+            self.focal_length_pixel_x = (self.focal_length_mm/self.sensor_width) * self.img_width_pixel 
+            
+            self.sensor_height = config['depth_estimation']['camera_parameters']['sensor_height']
+            self.img_height_pixel = config['depth_estimation']['camera_parameters']['img_height_pixel']
+            self.focal_length_pixel_y = (self.focal_length_mm/self.sensor_height) * self.img_height_pixel
+
+            self.min_distance = config['depth_estimation']['environment_dimensions']['min_distance']
+            self.max_distance = config['depth_estimation']['environment_dimensions']['max_distance']
+            self.ref_point_1 = np.array(config['depth_estimation']['environment_dimensions']['ref_point_1'])
+            self.ref_point_2 = np.array(config['depth_estimation']['environment_dimensions']['ref_point_2'])
+            self.ref_distance_irl = config['depth_estimation']['environment_dimensions']['ref_distance_irl']
+
+            # # # run2
+            # self.focal_length_mm = 25
+            # self.sensor_width = 32
+            # self.img_width_pixel = 1440
             # self.focal_length_pixel_x = (self.focal_length_mm/self.sensor_width) * self.img_width_pixel 
             
-            # self.sensor_height = 20.25
+            # self.sensor_height = 24
             # self.img_height_pixel = 1080
             # self.focal_length_pixel_y = (self.focal_length_mm/self.sensor_height) * self.img_height_pixel
 
-            # self.min_distance = 5.7
-            # self.max_distance = 30
-            # self.ref_point_1 = np.array([1620, 151])
-            # self.ref_point_2 = np.array([1820, 311])
-            # self.ref_distance_irl = 4.4
-
-            # # run2
-            self.focal_length_mm = 25
-            self.sensor_width = 32
-            self.img_width_pixel = 1440
-            self.focal_length_pixel_x = (self.focal_length_mm/self.sensor_width) * self.img_width_pixel 
-            
-            self.sensor_height = 24
-            self.img_height_pixel = 1080
-            self.focal_length_pixel_y = (self.focal_length_mm/self.sensor_height) * self.img_height_pixel
-
-            self.min_distance = 6.4
-            self.max_distance = 22.7
-            self.ref_point_1 = np.array([1338, 200])
-            self.ref_point_2 = np.array([1217, 75])
-            self.ref_distance_irl = 3.26
+            # self.min_distance = 6.4
+            # self.max_distance = 22.7
+            # self.ref_point_1 = np.array([1338, 200])
+            # self.ref_point_2 = np.array([1217, 75])
+            # self.ref_distance_irl = 3.26
 
             # run3
             # self.focal_length_mm = 20
@@ -758,7 +761,7 @@ class DepthCalculator:
 class DepthEstimatorZoeDepth:
     """Depth map estimation using ZoeDepth"""
 
-    def __init__(self, depth_calculator: DepthCalculator):
+    def __init__(self, depth_calculator: DepthCalculator, config):
         """
 
         Args:
@@ -766,7 +769,7 @@ class DepthEstimatorZoeDepth:
         """
         # torch.hub.help("intel-isl/MiDaS", "DPT_BEiT_L_384", force_reload=True)  # Triggers fresh download of MiDaS repo
         repo = "isl-org/ZoeDepth"
-        model = "ZoeD_NK"
+        model = config['depth_estimation']['zoedepth']['model']
         model_zoe = torch.hub.load(repo, model, pretrained=True)
         DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
         print("Using", DEVICE)
@@ -793,13 +796,13 @@ class DepthEstimatorZoeDepth:
 class DepthEstimatorAdabins:
     """Depth map estimation using AdaBins"""
 
-    def __init__(self, depth_calculator: DepthCalculator):
+    def __init__(self, depth_calculator: DepthCalculator, config):
         """
 
         Args:
             depth_calculator (DepthCalculator): depth calculator object
         """
-        self.infer_helper = InferenceHelper(dataset='nyu')
+        self.infer_helper = InferenceHelper(dataset=config['depth_estimation']['adabins']['inference_helper_dataset'])
         self.depth_calculator = depth_calculator
 
     def create_depth_map(self, input_frame: np.ndarray, **kwargs):
@@ -815,7 +818,7 @@ class DepthEstimatorAdabins:
         input_img = img.resize((640, 480)).convert("RGB")
         bin_centers, depth_map = self.infer_helper.predict_pil(input_img)
         depth_map = depth_map[0, 0, :, :]
-        depth_map_resized = Image.fromarray(depth_map).resize((1920, 1080))
+        depth_map_resized = Image.fromarray(depth_map).resize((input_frame.shape[0], input_frame.shape[1]))
         depth_map_array = np.array(depth_map_resized)
 
         return depth_map_array
@@ -824,19 +827,18 @@ class DepthEstimatorAdabins:
 class DepthEstimatorDepthAnything:
     """Depth map estimation using Depth Anything"""
 
-    def __init__(self, depth_calculator: DepthCalculator, encoder: str):
+    def __init__(self, depth_calculator: DepthCalculator, config):
         """
 
         Args:
             depth_calculator (DepthCalculator): depth calculator object
-            encoder (str): encoder model to use ('vits' or 'vitb' or 'vitl')
         """
         self.depth_calculator = depth_calculator
-        self.encoder = encoder
+        self.encoder = config['depth_estimation']['depth_anything']['encoder']
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         os.chdir(os.path.join(os.getcwd(), "Depth_Anything"))
         self.model = DepthAnything.from_pretrained(
-            'LiheYoung/depth_anything_{:}14'.format(encoder)).to(device=self.device).eval()
+            'LiheYoung/depth_anything_{:}14'.format(self.encoder)).to(device=self.device).eval()
         self.transform = Compose([Resize(
             width=518,
             height=518,
@@ -874,7 +876,7 @@ class DepthEstimatorDepthAnything:
 
 
 class DepthGT:
-    def __init__(self, folder_path: str = r"C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run2\EXR") -> None:
+    def __init__(self, folder_path: str) -> None:
         self.folder_path = folder_path
         self.depth_maps = sorted(os.listdir(folder_path))
 
@@ -890,7 +892,7 @@ class DepthGT:
 class LicensePlateDetector:
     """License plate detection."""
 
-    def __init__(self, oc_recognizer: OCR, depth_estimator, depth_calculator: DepthCalculator, region_checker: RegionChecker):
+    def __init__(self, oc_recognizer: OCR, depth_estimator, depth_calculator: DepthCalculator, region_checker: RegionChecker, config):
         """
         Args:
             oc_recognizer(OCR): The object that performs license plate OCR.
@@ -906,6 +908,9 @@ class LicensePlateDetector:
         self.region_checker = region_checker
         self.depth_estimation_ran = False
         self.skip_frame = False
+
+        self.min_conf = config['license_plate_detection']['min_conf']
+        self.nms_iou = config['license_plate_detection']['nms_iou']
 
     def detect_license_plates(self, frame: np.ndarray, show_frame: np.ndarray, vehicle_dictionary: Dict, iter: int) -> Dict:
         """Detect license plates in a frame and update vehicle predictions.
@@ -937,7 +942,7 @@ class LicensePlateDetector:
 
             if vehicle_dictionary[idx]['vd_tracked'] and not vehicle_dictionary[idx]['stationary']:
                 lp_preds = self.model_lp(
-                    cropped_vehicle, imgsz=640, iou=0.5, verbose=False)
+                    cropped_vehicle, imgsz=640, iou=self.nms_iou, verbose=False, conf=self.min_conf)
                 for result in lp_preds:  # Get predictions
                     if len(result) > 0 and not self.depth_estimation_ran:
                         depth_map_out = self.depth_estimator.create_depth_map(
@@ -954,6 +959,7 @@ class LicensePlateDetector:
 
                         # im = plt.imshow(depth_map, cmap= 'magma')
                         # cbar = plt.colorbar(im, orientation='horizontal', pad=0.05, shrink=0.7)
+                        # plt.show()
 
                         # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
                         # for ax in [ax1, ax2]:
@@ -1160,31 +1166,14 @@ class IOHandler:
 
 def main():
     parser = argparse.ArgumentParser(description="Traffic Speed Camera Script")
-
-    parser.add_argument(
-        "--input_path", default=r"C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run2\JPEG", help="Path to the input media")
-    parser.add_argument("--speeds_gt_file_path", default=r"C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run2\labels.txt",
-                        help="Path to the speed measurement benchmark file (should be .txt or .xml file)")
-    parser.add_argument("--speed_benchmark", default="ue5", choices=[
-                        "ue5", "brazilian_road"], help="Which speed measurement benchmark should be used")
-    parser.add_argument("--input_mode", default="burst_photos", choices=[
-                        "video", "burst_photos"], help="Input mode (video or burst_photos)")
-    parser.add_argument("--fps", type=float, default=30,
-                        help="Frames per second of the input video")
-    parser.add_argument("--depth_estimator_algorithm", default="gt", choices=[
-                        "zoedepth", "adabins", "depth_anything", "gt"], help="Depth estimator algorithm used")
+    parser.add_argument("--config_path", default=".\config\config.yaml", help="YAML config file path")
 
     args = parser.parse_args()
 
     speed_camera = TrafficSpeedCamera(
-        input_path=args.input_path,
-        speed_gts_path=args.speeds_gt_file_path,
-        speed_benchmark=args.speed_benchmark,
-        input_mode=args.input_mode,
-        fps=args.fps,
-        depth_estimator_algorithm=args.depth_estimator_algorithm
+        config_path=args.config_path
     )
-    speed_camera.run(show_tracking=True)
+    speed_camera.run()
 
 
 if __name__ == '__main__':

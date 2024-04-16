@@ -1,0 +1,67 @@
+input_media:
+  input_type: 'burst_photos'  # 'burst_photos' or 'video'
+  media_path: 'C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run1\JPEG'
+  depth_labels_path: 'C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run1\EXR'
+  speed_labels_path: 'C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run1\labels.txt'
+  benchmark_type: 'ue5'       # 'ue5' or 'brazilian_road'
+  fps: 30.0
+
+
+tracking:
+  sort:
+    max_age: 2
+    min_hits: 5
+    iou_threshold: 0.3
+    show_tracking: True
+
+
+vehicle_detection:
+  model_path: './models/yolov8m.pt'
+  searched_classes: [1, 2, 3, 5, 7]       # ["bicycle", "car", "motorcycle", "bus", "truck"]
+  min_conf: 0.4
+  nms_iou: 0.3
+
+
+license_plate_detection:
+  show_detections: True
+  min_conf: 0.25
+  nms_iou: 0.5
+
+
+depth_estimation:
+  model: 'gt'                              # 'gt' or 'adabins' or 'zoedepth' or 'depth_anything'
+  show_depth_map: False
+  show_correction: False
+  correction_mode: 'normalization'         # 'normalization' or 'scaling'
+  lp_depth_calculation_mode: 'median'      # 'median' or 'average'
+
+  regions:
+    speed_measurement_area: [[0, 300], [1920, 300], [1920, 600], [0, 600]]
+    lane_1_area: [[650, 0], [850, 0], [520, 1080], [0, 1080], [0, 750]]
+    lane_2_area: [[850, 0], [1060, 0], [1310, 1080], [500, 1080]]
+    lane_3_area: [[1060, 0], [1270, 0], [1920, 780], [1920, 1080], [1310, 1080]]
+    invalid_detection_area: [[1270, 0], [1920, 0], [1920, 780]]
+
+  camera_parameters:
+    focal_length_mm: 30
+    sensor_width: 36
+    img_width_pixel: 1920
+    sensor_height: 20.25
+    img_height_pixel: 1080
+
+  environment_dimensions:
+    min_distance: 5.7
+    max_distance: 30
+    ref_point_1: [1740, 288] # 14.6 m
+    ref_point_2: [1572, 156] # 18.5 m
+    ref_distance_irl: 3.9
+
+  zoedepth:
+    model: "ZoeD_NK"
+
+  adabins:
+    inference_helper_dataset: "nyu"
+
+  depth_anything:
+    encoder: "vits"
+
