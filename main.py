@@ -57,7 +57,7 @@ class TrafficSpeedCamera:
             self.depth_estimator = DepthEstimatorDepthAnything(
                 self.depth_calculator, self.config)
         else:
-            self.depth_estimator = DepthGT(self.config['input_media']['depth_labels_path'])
+            self.depth_estimator = DepthGT(self.config['input_media']['depth_labels_path'], self.config['depth_estimation']['show_depth_map'])
 
         self.license_plate_detector = LicensePlateDetector(
             self.oc_recognizer, self.depth_estimator, self.depth_calculator, self.region_checker, self.config)
@@ -161,55 +161,41 @@ class RegionChecker:
 
     def __init__(self, config) -> None:
         if config['input_media']['benchmark_type'] == "brazilian_road":
-            self.speed_measurement_area = np.array([[0, 460], [1920, 370], [1920, 650], [0, 800]])
-            self.lane_1_area = np.array([[222, 9], [599, 8], [519, 1071], [0, 1072]])
-            self.lane_2_area = np.array([[599, 9], [962, 8], [1349, 1067], [519, 1071]])
-            self.lane_3_area = np.array([[962, 8], [1307, 12], [1920, 1075], [1349, 1067]])
-            self.invalid_detection_area = np.array([
-                [0, 180], [1450, 170], [1920, 775], [1920, 0], [0, 0]])
+            section_name = 'regions_brazilian_road'
         elif config['input_media']['benchmark_type'] == "ue5":
-            self.speed_measurement_area = np.array(config['depth_estimation']['regions']['speed_measurement_area'])
-            self.lane_1_area = np.array(config['depth_estimation']['regions']['lane_1_area'])
-            self.lane_2_area = np.array(config['depth_estimation']['regions']['lane_2_area'])
-            self.lane_3_area = np.array(config['depth_estimation']['regions']['lane_3_area'])
-            self.invalid_detection_area = np.array(config['depth_estimation']['regions']['invalid_detection_area'])
+            section_name = 'regions_ue5'
+        else:
+            raise ValueError(f"Onyl 'ue5' or 'brazilian_road' benchmarks are available, but got {config['input_media']['benchmark_type']}.")
 
-            # run2
-            # self.speed_measurement_area = np.array([[0, 160], [1440, 160], [1440, 750], [0, 750]])
-            # self.lane_1_area = np.array([[412, 0], [608, 0], [332, 1080], [0, 1080], [0, 570]])
-            # self.lane_2_area = np.array([[608, 0], [808, 0], [1028, 1080], [332, 1080]])
-            # self.lane_3_area = np.array([[808, 0], [1013, 0], [1440, 615], [1440, 1080], [1028, 1080]])
-            # self.invalid_detection_area = np.array([[1013, 0], [1440, 0], [1440, 615]])
+        self.speed_measurement_area = np.array(config['depth_estimation'][section_name]['speed_measurement_area'])
+        self.lane_1_area = np.array(config['depth_estimation'][section_name]['lane_1_area'])
+        self.lane_2_area = np.array(config['depth_estimation'][section_name]['lane_2_area'])
+        self.lane_3_area = np.array(config['depth_estimation'][section_name]['lane_3_area'])
+        self.invalid_detection_area = np.array(config['depth_estimation'][section_name]['invalid_detection_area'])
 
-            # run3
-            # self.speed_measurement_area = np.array([[0, 220], [1920, 220], [1920, 670], [0, 670]])
-            # self.lane_1_area = np.array([[642, 0], [850, 0], [520, 1080], [0, 1080], [0, 730]])
-            # self.lane_2_area = np.array([[850, 0], [1070, 0], [1350, 1080], [520, 1080]])
-            # self.lane_3_area = np.array([[1070, 0], [1285, 0], [1920, 725], [1920, 1080], [1350, 1080]])
-            # self.invalid_detection_area = [np.array([[1285, 0], [1920, 0], [1920, 725]]), np.array([[0,0], [642, 0], [0, 730]])]
-
-    def is_point_in_polygon(self, point: Tuple, polygon):
-        """Checks if a point is in a given polygon.
+    def is_point_in_polygon(self, point: Tuple, polygons: np.ndarray):
+        """Checks if a point is in a given polygon or polygons.
 
         Args:
             point (Tuple): Point to check.
-            polygon (list(np.array) | np.array): Polygon to check.
+            polygons (np.ndarray): 2D or 3D np.array containing polygon corners forming polygons to check.
 
         Returns:
-            inside (bool): Whether the point is in the polygon or not.
+            inside (bool): Whether the point is in any of the polygon or not.
         """
         inside = False
-        if isinstance(polygon, np.ndarray):
-            poly_path = mplPath.Path(polygon)
-            if poly_path.contains_point(point):
-                inside = True
-        elif isinstance(polygon, (list)):
-            for poly in polygon:
-                poly_path = mplPath.Path(poly)
+        if polygons.ndim == 2:
+           poly_path = mplPath.Path(polygons)
+           if poly_path.contains_point(point):
+               inside = True
+
+        elif polygons.ndim == 3:
+            for dim in range(polygons.ndim-1):
+                poly_path = mplPath.Path(polygons[dim, :, :])
                 if poly_path.contains_point(point):
                     inside = True
                     break
-
+            
         return inside
 
 
@@ -553,69 +539,39 @@ class DepthCalculator:
                                         * self.img_width_pixel) / self.resolution_ratio_w  # 928.44
             self.focal_length_pixel_y = self.focal_length_pixel_x
 
-            self.min_distance = 4
-            self.max_distance = 13.5
-
-            self.ref_point_1 = np.array([649, 262])
-            self.ref_point_2 = np.array([647, 43])
-            self.ref_distance_irl = 4.8
+            self.min_distance = config['depth_estimation']['environment_dimensions_brazilian_road']['min_distance']
+            self.max_distance = config['depth_estimation']['environment_dimensions_brazilian_road']['max_distance']
+            self.ref_point_1 = np.array(config['depth_estimation']['environment_dimensions_brazilian_road']['ref_point_1'])
+            self.ref_point_2 = np.array(config['depth_estimation']['environment_dimensions_brazilian_road']['ref_point_2'])
+            self.ref_distance_irl = config['depth_estimation']['environment_dimensions_brazilian_road']['ref_distance_irl']
         
         if config['input_media']['benchmark_type'] == "ue5":
-            self.focal_length_mm = config['depth_estimation']['camera_parameters']['focal_length_mm']
-            self.sensor_width = config['depth_estimation']['camera_parameters']['sensor_width']
-            self.img_width_pixel = config['depth_estimation']['camera_parameters']['img_width_pixel']
+            self.focal_length_mm = config['depth_estimation']['camera_parameters_ue5']['focal_length_mm']
+            self.sensor_width = config['depth_estimation']['camera_parameters_ue5']['sensor_width']
+            self.img_width_pixel = config['depth_estimation']['camera_parameters_ue5']['img_width_pixel']
             self.focal_length_pixel_x = (self.focal_length_mm/self.sensor_width) * self.img_width_pixel 
             
-            self.sensor_height = config['depth_estimation']['camera_parameters']['sensor_height']
-            self.img_height_pixel = config['depth_estimation']['camera_parameters']['img_height_pixel']
+            self.sensor_height = config['depth_estimation']['camera_parameters_ue5']['sensor_height']
+            self.img_height_pixel = config['depth_estimation']['camera_parameters_ue5']['img_height_pixel']
             self.focal_length_pixel_y = (self.focal_length_mm/self.sensor_height) * self.img_height_pixel
 
-            self.min_distance = config['depth_estimation']['environment_dimensions']['min_distance']
-            self.max_distance = config['depth_estimation']['environment_dimensions']['max_distance']
-            self.ref_point_1 = np.array(config['depth_estimation']['environment_dimensions']['ref_point_1'])
-            self.ref_point_2 = np.array(config['depth_estimation']['environment_dimensions']['ref_point_2'])
-            self.ref_distance_irl = config['depth_estimation']['environment_dimensions']['ref_distance_irl']
+            self.min_distance = config['depth_estimation']['environment_dimensions_ue5']['min_distance']
+            self.max_distance = config['depth_estimation']['environment_dimensions_ue5']['max_distance']
+            self.ref_point_1 = np.array(config['depth_estimation']['environment_dimensions_ue5']['ref_point_1'])
+            self.ref_point_2 = np.array(config['depth_estimation']['environment_dimensions_ue5']['ref_point_2'])
+            self.ref_distance_irl = config['depth_estimation']['environment_dimensions_ue5']['ref_distance_irl']
 
-            # # # run2
-            # self.focal_length_mm = 25
-            # self.sensor_width = 32
-            # self.img_width_pixel = 1440
-            # self.focal_length_pixel_x = (self.focal_length_mm/self.sensor_width) * self.img_width_pixel 
-            
-            # self.sensor_height = 24
-            # self.img_height_pixel = 1080
-            # self.focal_length_pixel_y = (self.focal_length_mm/self.sensor_height) * self.img_height_pixel
-
-            # self.min_distance = 6.4
-            # self.max_distance = 22.7
-            # self.ref_point_1 = np.array([1338, 200])
-            # self.ref_point_2 = np.array([1217, 75])
-            # self.ref_distance_irl = 3.26
-
-            # run3
-            # self.focal_length_mm = 20
-            # self.sensor_width = 32
-            # self.img_width_pixel = 1920
-            # self.focal_length_pixel_x = (self.focal_length_mm/self.sensor_width) * self.img_width_pixel 
-            
-            # self.sensor_height = 18
-            # self.img_height_pixel = 1080
-            # self.focal_length_pixel_y = (self.focal_length_mm/self.sensor_height) * self.img_height_pixel
-
-            # self.min_distance = 5.7
-            # self.max_distance = 23
-            # self.ref_point_1 = np.array([1775, 285])
-            # self.ref_point_2 = np.array([1589, 143])
-            # self.ref_distance_irl = 3.23
-
+        self.correction_mode = config['depth_estimation']['correction_mode']
+        self.show_correction = config['depth_estimation']['show_correction']
+        self.lp_depth_calculation_mode = config['depth_estimation']['lp_depth_calculation_mode']
         self.scaling_ratios = np.array([], dtype=np.float16)
         self.avg_running_scaling_ratio = 0
         self.avg_scaling_ratio = 0
         self.threshold = 0
         self.iter = 1
 
-    @staticmethod
-    def get_license_plate_depth(cropped_lp_depth_map: np.ndarray, mode: str):
+
+    def get_license_plate_depth(self, cropped_lp_depth_map: np.ndarray):
         """License plate depth calculation with median or average value.
 
         Args:
@@ -625,12 +581,12 @@ class DepthCalculator:
         Returns:
             lp_depth(np.float16): The depth of the license plate from the camera in meters.
         """
-        if mode == "average":
+        if self.lp_depth_calculation_mode == "average":
             return np.float16(np.average(cropped_lp_depth_map))
-        elif mode == "median":
+        elif self.lp_depth_calculation_mode == "median":
             return np.median(cropped_lp_depth_map)
         else:
-            raise(NotImplementedError("mode can only be 'average' or 'median' but got {}".format(mode)))
+            raise(NotImplementedError("mode can only be 'average' or 'median' but got {}".format(self.lp_depth_calculation_mode)))
 
 
     def get_3D_coordinates(self, depth_map: np.ndarray, u: int, v: int, z: int):
@@ -652,16 +608,11 @@ class DepthCalculator:
 
         return np.array([x, y, z], dtype = np.float16)
 
-    def correct_depth_map(self, depth_map: np.ndarray, scaling_ratio: float = 1.0, method: str = 'scaling'):
+    def correct_depth_map(self, depth_map: np.ndarray):
         """Depth map correction.
 
         Args:
             depth_map (np.ndarray): Depth map to correct.
-            scaling_ratio (float, optional): Scaling ratio to use. Defaults to 1.0.
-            method (str, optional): Correction method to use. Can be "normalizing" or "scaling". Defaults to 'scaling'.
-
-        Raises:
-            ValueError: If the method input parameter is not "normalizing" or "scaling".
 
         Returns:
             depth_map_modified(np.ndarray): Corrected depth map.
@@ -676,26 +627,39 @@ class DepthCalculator:
         # depth_map[depth_map < lower_threshold] = lower_threshold
         # depth_map[depth_map > upper_threshold] = upper_threshold
 
-        if method == 'normalizing':
+        if self.correction_mode == 'normalization':
             depth_map_modified = ((depth_map-np.min(depth_map))*(self.max_distance-self.min_distance))/(
                 np.max(depth_map)-np.min(depth_map)) + self.min_distance
 
-            # plt.hist(depth_map_normalized, bins=[2.9, 4])
-            # # plt.show()
-
-            # print(np.min(depth_map_normalized))
-            # filtered_values = depth_map_normalized[(depth_map_normalized >= 2.9) & (depth_map_normalized <= 4)]
-
-            # # Print the filtered values
-            # print(filtered_values.shape)
-            # print(filtered_values)
-
-        elif method == 'scaling':
+        elif self.correction_mode == 'scaling':
+            scaling_ratio, _ = self.get_scaling_ratio(depth_map)
             depth_map_modified = depth_map*scaling_ratio
+
+        elif self.correction_mode == 'None':
+            depth_map_modified = depth_map
 
         else:
             raise ValueError(
-                "method can be either 'scaling' or 'normalizing' but got {}".format(method))
+                "method can be either 'scaling' or 'normalizing' but got {}".format(self.correction_mode))
+        
+        if self.show_correction:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
+            for ax in [ax1, ax2]:
+                ax.set_xticks([])
+                ax.set_yticks([])
+                ax.set_xticklabels([])
+                ax.set_yticklabels([])
+            im1 = ax1.imshow(depth_map, cmap='magma')
+            ax1.set_title("Original")
+            cbar1 = plt.colorbar(im1, ax=ax1, orientation='horizontal', pad=0.05, shrink=0.7)
+            cbar1.set_label('Depth [m]', fontsize=28)
+            cbar1.ax.tick_params(labelsize=28)
+            im2 = ax2.imshow(depth_map_modified, cmap='magma')
+            ax2.set_title("Corrected")
+            cbar2 = plt.colorbar(im2, ax=ax2, orientation='horizontal', pad=0.05, shrink=0.7)
+            cbar2.set_label('Depth [m]', fontsize=28)
+            cbar2.ax.tick_params(labelsize=28)
+            plt.show()
 
         return depth_map_modified
 
@@ -775,6 +739,7 @@ class DepthEstimatorZoeDepth:
         print("Using", DEVICE)
         self.zoe = model_zoe.to(DEVICE)
         self.depth_calculator = depth_calculator
+        self.show_depth_map = config['depth_estimation']['show_depth_map']
 
     def create_depth_map(self, input_frame: np.ndarray, **kwargs):
         """Estimate a depth map using ZoeDepth.
@@ -789,8 +754,13 @@ class DepthEstimatorZoeDepth:
         input_img = img.convert("RGB")
         depth_map = self.zoe.infer_pil(
             input_img, pad_input=False, with_flip_aug=False)
-
-        return depth_map
+        
+        if self.show_depth_map:
+            im = plt.imshow(depth_map, cmap= 'magma')
+            cbar = plt.colorbar(im, orientation='horizontal', pad=0.05, shrink=0.7)
+            plt.show()
+        
+        return self.depth_calculator.correct_depth_map(depth_map)
 
 
 class DepthEstimatorAdabins:
@@ -804,6 +774,7 @@ class DepthEstimatorAdabins:
         """
         self.infer_helper = InferenceHelper(dataset=config['depth_estimation']['adabins']['inference_helper_dataset'])
         self.depth_calculator = depth_calculator
+        self.show_depth_map = config['depth_estimation']['show_depth_map']
 
     def create_depth_map(self, input_frame: np.ndarray, **kwargs):
         """Estimate a depth map using AdaBins.
@@ -818,10 +789,15 @@ class DepthEstimatorAdabins:
         input_img = img.resize((640, 480)).convert("RGB")
         bin_centers, depth_map = self.infer_helper.predict_pil(input_img)
         depth_map = depth_map[0, 0, :, :]
-        depth_map_resized = Image.fromarray(depth_map).resize((input_frame.shape[0], input_frame.shape[1]))
+        depth_map_resized = Image.fromarray(depth_map).resize((input_frame.shape[1], input_frame.shape[0]))
         depth_map_array = np.array(depth_map_resized)
 
-        return depth_map_array
+        if self.show_depth_map:
+            im = plt.imshow(depth_map, cmap= 'magma')
+            cbar = plt.colorbar(im, orientation='horizontal', pad=0.05, shrink=0.7)
+            plt.show()
+
+        return self.depth_calculator.correct_depth_map(depth_map_array)
 
 
 class DepthEstimatorDepthAnything:
@@ -851,6 +827,7 @@ class DepthEstimatorDepthAnything:
                            std=[0.229, 0.224, 0.225]),
             PrepareForNet(),])
         os.chdir(os.path.join(os.getcwd(), ".."))
+        self.show_depth_map = config['depth_estimation']['show_depth_map']
 
     def create_depth_map(self, input_frame: np.ndarray, **kwargs):
         """Estimate a depth map using AdaBins.
@@ -872,19 +849,30 @@ class DepthEstimatorDepthAnything:
         depth = 1 - depth
         depth_map_array = depth.cpu().numpy()
 
-        return depth_map_array
+        if self.show_depth_map:
+            im = plt.imshow(depth_map_array, cmap= 'magma')
+            cbar = plt.colorbar(im, orientation='horizontal', pad=0.05, shrink=0.7)
+            plt.show()
+
+        return self.depth_calculator.correct_depth_map(depth_map_array)
 
 
 class DepthGT:
-    def __init__(self, folder_path: str) -> None:
+    def __init__(self, folder_path: str, show_depth_map: str) -> None:
         self.folder_path = folder_path
         self.depth_maps = sorted(os.listdir(folder_path))
+        self.show_depth_map = show_depth_map
 
     def create_depth_map(self, input_img: np.ndarray, map_index: int) -> np.ndarray:
         exr = OpenEXR.InputFile(os.path.join(self.folder_path, self.depth_maps[map_index]))
         depth_data = {'R': np.frombuffer(exr.channel('FinalImageMovieRenderQueue_WorldDepth.R'), dtype=np.float16)}
         reshaped_depth_data = {'R': depth_data['R'].reshape((input_img.shape[0], input_img.shape[1]))}
         depth_map = reshaped_depth_data['R'] / 100
+
+        if self.show_depth_map:
+            im = plt.imshow(depth_map, cmap= 'magma')
+            cbar = plt.colorbar(im, orientation='horizontal', pad=0.05, shrink=0.7)
+            plt.show()
 
         return depth_map
 
@@ -945,37 +933,15 @@ class LicensePlateDetector:
                     cropped_vehicle, imgsz=640, iou=self.nms_iou, verbose=False, conf=self.min_conf)
                 for result in lp_preds:  # Get predictions
                     if len(result) > 0 and not self.depth_estimation_ran:
-                        depth_map_out = self.depth_estimator.create_depth_map(
+                        depth_map = self.depth_estimator.create_depth_map(
                             frame, map_index=iter-1)
 
-                        scaling_ratio, self.skip_frame = self.depth_calculator.get_scaling_ratio(
-                            depth_map_out)
+                        _, self.skip_frame = self.depth_calculator.get_scaling_ratio(
+                            depth_map)
                         if self.skip_frame:
                             print("Frame skipped because of incorrect depth map")
                             break
-                        # depth_map = self.depth_calculator.correct_depth_map(
-                        #     depth_map_out, scaling_ratio, method='normalizing')
-                        depth_map = depth_map_out
 
-                        # im = plt.imshow(depth_map, cmap= 'magma')
-                        # cbar = plt.colorbar(im, orientation='horizontal', pad=0.05, shrink=0.7)
-                        # plt.show()
-
-                        # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
-                        # for ax in [ax1, ax2]:
-                        #     ax.set_xticks([])
-                        #     ax.set_yticks([])
-                        #     ax.set_xticklabels([])
-                        #     ax.set_yticklabels([])
-                        # im1 = ax1.imshow(depth_map, cmap='magma')
-                        # cbar1 = plt.colorbar(im1, ax=ax1, orientation='horizontal', pad=0.05, shrink=0.7)
-                        # cbar1.set_label('Depth [m]', fontsize=28)
-                        # cbar1.ax.tick_params(labelsize=28)
-                        # im2 = ax2.imshow(depth_map_out, cmap='magma')
-                        # cbar2 = plt.colorbar(im2, ax=ax2, orientation='horizontal', pad=0.05, shrink=0.7)
-                        # cbar2.set_label('Depth [m]', fontsize=28)
-                        # cbar2.ax.tick_params(labelsize=28)
-                        # plt.show()
 
                         self.depth_estimation_ran = True
                     boxes = result.boxes  # Get bounding boxes
@@ -1019,7 +985,7 @@ class LicensePlateDetector:
                             cropped_lp_depth_map = np.array(
                                 cropped_vehicle_depth_map[y1_lp:y2_lp, x1_lp:x2_lp])
                             lp_depth = self.depth_calculator.get_license_plate_depth(
-                                cropped_lp_depth_map, 'median')
+                                cropped_lp_depth_map)
                             vehicle_dictionary[idx]['lp_detected_frames'].append(
                                 iter)
 
@@ -1153,7 +1119,8 @@ class IOHandler:
         df['gt_speed'] = df['gt_speed'].apply(lambda x: "{:.2f}".format(x))
         df['lp_first_detected_frame'] = df['lp_detected_frames'].apply(
             lambda x: x[0] if x else None)
-        df.to_excel('speed_estimation_results.xlsx', columns=[
+        os.makedirs("./results", exist_ok=True)
+        df.to_excel('./results/speed_estimation_results.xlsx', columns=[
                     'lane', 'gt_lane', 'predicted_speed', 'gt_speed', 'lp_first_detected_frame', 'gt_iframe', 'was_stationary'])
 
     def end_stream(self):

@@ -1,8 +1,8 @@
 input_media:
   input_type: 'burst_photos'  # 'burst_photos' or 'video'
-  media_path: 'C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run1\JPEG'
-  depth_labels_path: 'C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run1\EXR'
-  speed_labels_path: 'C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run1\labels.txt'
+  media_path: 'C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run2\JPEG'
+  depth_labels_path: 'C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run2\EXR'
+  speed_labels_path: 'C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run2\labels.txt'
   benchmark_type: 'ue5'       # 'ue5' or 'brazilian_road'
   fps: 30.0
 
@@ -31,30 +31,46 @@ license_plate_detection:
 depth_estimation:
   model: 'gt'                              # 'gt' or 'adabins' or 'zoedepth' or 'depth_anything'
   show_depth_map: False
-  show_correction: False
-  correction_mode: 'normalization'         # 'normalization' or 'scaling'
+  show_correction: True
+  correction_mode: 'normalization'         # 'normalization' or 'scaling' or 'None'
   lp_depth_calculation_mode: 'median'      # 'median' or 'average'
 
-  regions:
-    speed_measurement_area: [[0, 300], [1920, 300], [1920, 600], [0, 600]]
-    lane_1_area: [[650, 0], [850, 0], [520, 1080], [0, 1080], [0, 750]]
-    lane_2_area: [[850, 0], [1060, 0], [1310, 1080], [500, 1080]]
-    lane_3_area: [[1060, 0], [1270, 0], [1920, 780], [1920, 1080], [1310, 1080]]
-    invalid_detection_area: [[1270, 0], [1920, 0], [1920, 780]]
+  regions_ue5:
+    speed_measurement_area: [[0, 220], [1920, 220], [1920, 670], [0, 670]]
+    lane_1_area: [[642, 0], [850, 0], [520, 1080], [0, 1080], [0, 730]]
+    lane_2_area: [[850, 0], [1070, 0], [1350, 1080], [520, 1080]]
+    lane_3_area: [[1070, 0], [1285, 0], [1920, 725], [1920, 1080], [1350, 1080]]
+    invalid_detection_area: [[[1285, 0], [1920, 0], [1920, 725]], [[0,0], [642, 0], [0, 730]]]
 
-  camera_parameters:
-    focal_length_mm: 30
-    sensor_width: 36
+  camera_parameters_ue5:
+    focal_length_mm: 20
+    sensor_width: 32
     img_width_pixel: 1920
-    sensor_height: 20.25
+    sensor_height: 18
     img_height_pixel: 1080
 
-  environment_dimensions:
+  environment_dimensions_ue5:
     min_distance: 5.7
-    max_distance: 30
-    ref_point_1: [1740, 288] # 14.6 m
-    ref_point_2: [1572, 156] # 18.5 m
-    ref_distance_irl: 3.9
+    max_distance: 23
+    ref_point_1: [1775, 285] 
+    ref_point_2: [1589, 143]
+    ref_distance_irl: 3.23
+
+
+  regions_brazilian_road:
+    speed_measurement_area: [[0, 460], [1920, 370], [1920, 650], [0, 800]]
+    lane_1_area: [[222, 9], [599, 8], [519, 1071], [0, 1072]]
+    lane_2_area: [[599, 9], [962, 8], [1349, 1067], [519, 1071]]
+    lane_3_area: [[962, 8], [1307, 12], [1920, 1075], [1349, 1067]]
+    invalid_detection_area: [[0, 180], [1450, 170], [1920, 775], [1920, 0], [0, 0]]
+
+  environment_dimensions_brazilian_road:
+    min_distance: 4
+    max_distance: 13.5
+    ref_point_1: [649, 262] 
+    ref_point_2: [647, 43]
+    ref_distance_irl: 4.8
+
 
   zoedepth:
     model: "ZoeD_NK"
