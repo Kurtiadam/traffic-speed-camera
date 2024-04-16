@@ -575,18 +575,23 @@ class DepthCalculator:
         self.iter = 1
 
     @staticmethod
-    def get_license_plate_depth(cropped_lp_depth_map: np.ndarray):
-        """Depth outlier filtering.
+    def get_license_plate_depth(cropped_lp_depth_map: np.ndarray, mode: str):
+        """License plate depth calculation with median or average value.
 
         Args:
             cropped_lp_depth_map (np.ndarray): Depth map cropped for the license plate area.
+            mode (str): Calculation mode: 'median' or 'average'.
 
         Returns:
             lp_depth(np.float16): The depth of the license plate from the camera in meters.
         """
-        lp_depth = np.float16(np.average(cropped_lp_depth_map))
+        if mode == "average":
+            return np.float16(np.average(cropped_lp_depth_map))
+        elif mode == "median":
+            return np.median(cropped_lp_depth_map)
+        else:
+            raise(NotImplementedError("mode can only be 'average' or 'median' but got {}".format(mode)))
 
-        return lp_depth
 
     def get_3D_coordinates(self, depth_map: np.ndarray, u: int, v: int, z: int):
         """Get the 3D coordinates of an object on the image given its depth map.
@@ -971,7 +976,7 @@ class LicensePlateDetector:
                             cropped_lp_depth_map = np.array(
                                 cropped_vehicle_depth_map[y1_lp:y2_lp, x1_lp:x2_lp])
                             lp_depth = self.depth_calculator.get_license_plate_depth(
-                                cropped_lp_depth_map)
+                                cropped_lp_depth_map, 'median')
                             vehicle_dictionary[idx]['lp_detected_frames'].append(
                                 iter)
 
