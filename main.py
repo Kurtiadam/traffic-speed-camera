@@ -1,8 +1,10 @@
 from torchvision.transforms import Compose
+from tifffile import imread as tif_read
 from torchvision import transforms
 import xml.etree.ElementTree as ET
 import matplotlib.path as mplPath
 from collections import Counter
+import matplotlib.pyplot as plt
 from typing import Tuple, Dict
 from ultralytics import YOLO
 from PIL import Image
@@ -10,7 +12,6 @@ import pandas as pd
 from sort import *
 import numpy as np
 import argparse
-import OpenEXR
 import torch
 import math
 import time
@@ -19,7 +20,6 @@ import cv2
 import sys
 import re
 import os
-
 from OCR.config_utils import load_config
 from OCR.ocr_model import create_network
 from OCR.ocr_model_multirow import create_network as create_network_multi
@@ -830,7 +830,7 @@ class DepthEstimatorDepthAnything:
         self.show_depth_map = config['depth_estimation']['show_depth_map']
 
     def create_depth_map(self, input_frame: np.ndarray, **kwargs):
-        """Estimate a depth map using AdaBins.
+        """Estimate a depth map using Depth Anything.
 
         Args:
             input_frame (np.ndarray): Input RGB frame to estimate depth map from.
@@ -863,12 +863,8 @@ class DepthGT:
         self.depth_maps = sorted(os.listdir(folder_path))
         self.show_depth_map = show_depth_map
 
-    def create_depth_map(self, input_img: np.ndarray, map_index: int) -> np.ndarray:
-        exr = OpenEXR.InputFile(os.path.join(self.folder_path, self.depth_maps[map_index]))
-        depth_data = {'R': np.frombuffer(exr.channel('FinalImageMovieRenderQueue_WorldDepth.R'), dtype=np.float16)}
-        reshaped_depth_data = {'R': depth_data['R'].reshape((input_img.shape[0], input_img.shape[1]))}
-        depth_map = reshaped_depth_data['R'] / 100
-
+    def create_depth_map(self, map_index: int, **kwargs) -> np.ndarray:
+        depth_map = tif_read(os.path.join(self.folder_path, self.depth_maps[map_index]))
         if self.show_depth_map:
             im = plt.imshow(depth_map, cmap= 'magma')
             cbar = plt.colorbar(im, orientation='horizontal', pad=0.05, shrink=0.7)
