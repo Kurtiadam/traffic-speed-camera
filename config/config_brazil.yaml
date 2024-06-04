@@ -1,9 +1,9 @@
 input_media:
-  input_type: 'burst_photos'  # 'burst_photos' or 'video'
-  media_path: 'C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\runc\JPEG'
-  depth_labels_path: 'C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\runc\depth_png'
-  speed_labels_path: 'C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\runc\labels.txt'
-  benchmark_type: 'ue5'       # 'ue5' or 'brazilian_road'
+  input_type: 'video'  # 'burst_photos' or 'video'
+  media_path: 'examples\speed_measurement_sample.mp4'
+  depth_labels_path: 'C:\Users\Adam\Documents\Unreal Projects\Gyorsitosav_sim\Saved\MovieRenders\run2\EXR'
+  speed_labels_path: 'vehicles.xml'
+  benchmark_type: 'brazilian_road'       # 'ue5' or 'brazilian_road'
   fps: 30.0
 
 
@@ -29,7 +29,7 @@ license_plate_detection:
 
 
 depth_estimation:
-  model: 'depth_anything'                              # 'gt' or 'adabins' or 'zoedepth' or 'depth_anything'
+  model: 'adabins'                              # 'gt' or 'adabins' or 'zoedepth' or 'depth_anything'
   show_depth_map: False
   show_correction: False
   correction_mode: 'normalization'         # 'normalization' or 'scaling' or 'None'
@@ -67,8 +67,8 @@ depth_estimation:
   environment_dimensions_brazilian_road:
     min_distance: 4
     max_distance: 13.5
-    ref_point_1: [649, 262] 
-    ref_point_2: [647, 43]
+    ref_point_1: [583, 262] 
+    ref_point_2: [597, 42]
     ref_distance_irl: 4.8
 
 
@@ -76,8 +76,8 @@ depth_estimation:
     model: "ZoeD_NK"
 
   adabins:
-    inference_helper_dataset: "nyu" # 'nyu' or 'kitti'
+    inference_helper_dataset: "nyu"
 
   depth_anything:
-    encoder: "vitl" # 'vits' or 'vitl' or 'vitb'
+    encoder: "vitl"
 
