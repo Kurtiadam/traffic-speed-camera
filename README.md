@@ -13,6 +13,6 @@ Run the following commands:\
 For inspecting the Brazilian speed measurement benchmark: ```python main.py --config_path .\config\config_brazil.yaml```\
 For inspecting the license plate recognition: ```python main.py --config_path .\config\config_ocr.yaml```
 
-Other commands can be viewed by: ```python main.py --help```
+Other settings can be viewed in the config files in the [config](config) folder.
 
 You can exit the running of the algorithm by pressing 'q' or waiting for the input to finish. Upon completion, the speed measurement results will be saved in an excel file named 'speed_estimation_results.xlsx'.
