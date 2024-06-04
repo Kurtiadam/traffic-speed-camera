@@ -1,5 +1,4 @@
 from torchvision.transforms import Compose
-from tifffile import imread as tif_read
 from torchvision import transforms
 import xml.etree.ElementTree as ET
 import matplotlib.path as mplPath
@@ -12,6 +11,7 @@ import pandas as pd
 from sort import *
 import numpy as np
 import argparse
+import imageio
 import torch
 import math
 import time
@@ -864,7 +864,7 @@ class DepthGT:
         self.show_depth_map = show_depth_map
 
     def create_depth_map(self, map_index: int, **kwargs) -> np.ndarray:
-        depth_map = tif_read(os.path.join(self.folder_path, self.depth_maps[map_index]))
+        depth_map = imageio.v2.imread(os.path.join(self.folder_path, self.depth_maps[map_index])) / 100 # conversion to meters
         if self.show_depth_map:
             im = plt.imshow(depth_map, cmap= 'magma')
             cbar = plt.colorbar(im, orientation='horizontal', pad=0.05, shrink=0.7)
@@ -930,7 +930,7 @@ class LicensePlateDetector:
                 for result in lp_preds:  # Get predictions
                     if len(result) > 0 and not self.depth_estimation_ran:
                         depth_map = self.depth_estimator.create_depth_map(
-                            frame, map_index=iter-1)
+                            input_frame=frame, map_index=iter-1)
 
                         _, self.skip_frame = self.depth_calculator.get_scaling_ratio(
                             depth_map)
