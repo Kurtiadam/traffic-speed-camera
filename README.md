@@ -10,8 +10,8 @@ Required libraries and other resources:
 - create virtual environment with conda using the following command: ```conda env create -f environment.yaml```
 
 Run the following commands:\
-For inspecting the speed measurement benchmark: ```python main.py --input_path ./samples/speed_measurement_sample_cut.MOV```\
-For inspecting the license plate recognition: ```python main.py --input_path ./samples/ocr_sample.MOV```
+For inspecting the Brazilian speed measurement benchmark: ```python main.py --config_path .\config\config_brazil.yaml```\
+For inspecting the license plate recognition: ```python main.py --config_path .\config\config_ocr.yaml```
 
 Other commands can be viewed by: ```python main.py --help```
 
